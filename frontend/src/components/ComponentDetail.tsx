@@ -38,7 +38,7 @@ export function ComponentDetail({ component: c, onDelete }: Props) {
           label="Conformal Coat"
           value={
             c.env_coated ? (
-              <Badge className="text-[10px] py-0 px-1.5 bg-emerald-100 text-emerald-700 hover:bg-emerald-100">
+              <Badge variant="success" className="text-[10px] py-0 px-1.5">
                 Yes
               </Badge>
             ) : (

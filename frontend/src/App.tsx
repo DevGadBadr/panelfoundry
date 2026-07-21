@@ -11,9 +11,9 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
-        <div className="min-h-screen bg-background text-foreground">
+        <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
           {/* Top nav */}
-          <header className="border-b px-4 py-2 flex items-center gap-3">
+          <header className="flex shrink-0 items-center gap-3 border-b border-border/80 bg-background px-4 py-2">
             <span className="text-sm font-bold tracking-tight">Foundry</span>
             <span className="text-xs text-muted-foreground">PLC Component Catalog</span>
             <div className="ml-auto">
@@ -22,7 +22,7 @@ export default function App() {
           </header>
 
           {/* Main layout */}
-          <main className="max-w-[1280px] mx-auto">
+          <main className="mx-auto flex min-h-0 w-full max-w-[1280px] flex-1 flex-col overflow-hidden">
             <ComponentsPage />
           </main>
         </div>

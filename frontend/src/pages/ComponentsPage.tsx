@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, Pencil, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -50,7 +51,9 @@ export function ComponentsPage() {
   const [panelClosing, setPanelClosing] = useState(false)
   const [transitionsReady, setTransitionsReady] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Component | null>(null)
+  const [typeFilter, setTypeFilter] = useState<string | null>(null)
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const rowPointerRef = useRef<{ x: number; y: number } | null>(null)
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['components'],
@@ -58,6 +61,11 @@ export function ComponentsPage() {
   })
 
   const components = data?.results ?? []
+
+  const filtered = useMemo(
+    () => (typeFilter ? components.filter((c) => c.type === typeFilter) : components),
+    [components, typeFilter],
+  )
 
   const selected = useMemo(() => {
     if (!selectedSerial) return null
@@ -193,6 +201,34 @@ export function ComponentsPage() {
     setPanel('detail')
   }
 
+  // Only open on a clean single click — not drag-to-select or multi-click.
+  const ROW_DRAG_THRESHOLD_PX = 5
+
+  const onRowPointerDown = (e: ReactPointerEvent) => {
+    if (e.button !== 0) {
+      rowPointerRef.current = null
+      return
+    }
+    rowPointerRef.current = { x: e.clientX, y: e.clientY }
+  }
+
+  const onRowClick = (e: ReactMouseEvent, c: Component) => {
+    if (e.detail !== 1) return
+
+    const start = rowPointerRef.current
+    rowPointerRef.current = null
+    if (start) {
+      const dx = Math.abs(e.clientX - start.x)
+      const dy = Math.abs(e.clientY - start.y)
+      if (dx > ROW_DRAG_THRESHOLD_PX || dy > ROW_DRAG_THRESHOLD_PX) return
+    }
+
+    const sel = window.getSelection()
+    if (sel && !sel.isCollapsed && sel.toString().trim().length > 0) return
+
+    openDetail(c)
+  }
+
   const cancelEdit = () => {
     setDraft(null)
     setPanel('detail')
@@ -207,15 +243,25 @@ export function ComponentsPage() {
     deleteMut.mutate(deleteTarget.serial_number)
   }
 
+  const applyTypeFilter = (type: string) => {
+    setTypeFilter(type)
+  }
+
+  const clearTypeFilter = () => {
+    setTypeFilter(null)
+  }
+
   // Keep panel mounted while closing so the slide-out can finish.
   const panelMounted = panel !== null
   const panelOpen = panelMounted && !panelClosing
   const panelTitle =
     panel === 'create'
       ? 'New Component'
-      : panel === 'edit' && selectedSerial
-        ? `Edit — ${selectedSerial}`
-        : selectedSerial ?? ''
+      : panel === 'edit'
+        ? selected
+          ? `Edit — ${selected.name}`
+          : 'Edit'
+        : selected?.name ?? ''
 
   // Form initial: prefer persisted draft over live component.
   const formInitial =
@@ -223,19 +269,39 @@ export function ComponentsPage() {
     (panel === 'edit' && selected ? selected : undefined)
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b">
-        <div>
+      <div className="flex items-center justify-between gap-3 border-b border-border/80 px-4 py-3">
+        <div className="min-w-0">
           <h1 className="text-base font-semibold">Components</h1>
           <p className="text-xs text-muted-foreground">
-            {data?.count ?? 0} components in catalog
+            {typeFilter
+              ? `${filtered.length} of ${data?.count ?? 0} components`
+              : `${data?.count ?? 0} components in catalog`}
           </p>
         </div>
-        <Button size="sm" className="h-7 gap-1 text-xs" onClick={openCreate}>
-          <Plus className="h-3.5 w-3.5" />
-          Add Component
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          {typeFilter && (
+            <Badge
+              variant="secondary"
+              className="h-7 gap-1.5 rounded-md px-2 text-xs font-normal"
+            >
+              Type: {typeFilter}
+              <button
+                type="button"
+                className="rounded-sm opacity-70 hover:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                onClick={clearTypeFilter}
+                aria-label={`Clear type filter ${typeFilter}`}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+          )}
+          <Button size="sm" className="h-7 gap-1 text-xs" onClick={openCreate}>
+            <Plus className="h-3.5 w-3.5" />
+            Add Component
+          </Button>
+        </div>
       </div>
 
       {/* Split: table + side panel share one continuous bg */}
@@ -274,7 +340,21 @@ export function ComponentsPage() {
                     </TableCell>
                   </TableRow>
                 )}
-                {components.map((c) => {
+                {components.length > 0 && filtered.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center text-xs text-muted-foreground py-8">
+                      No components match type “{typeFilter}”.{' '}
+                      <button
+                        type="button"
+                        className="underline underline-offset-2 hover:text-foreground"
+                        onClick={clearTypeFilter}
+                      >
+                        Clear filter
+                      </button>
+                    </TableCell>
+                  </TableRow>
+                )}
+                {filtered.map((c) => {
                   const isSelected =
                     panel !== 'create' && selectedSerial === c.serial_number && panelOpen
                   return (
@@ -283,12 +363,26 @@ export function ComponentsPage() {
                       className={`text-xs cursor-pointer ${
                         isSelected ? 'bg-muted' : 'hover:bg-muted/50'
                       }`}
-                      onClick={() => openDetail(c)}
+                      onPointerDown={onRowPointerDown}
+                      onClick={(e) => onRowClick(e, c)}
                     >
                       <TableCell className="font-mono font-medium">{c.serial_number}</TableCell>
                       <TableCell>{c.name}</TableCell>
                       <TableCell>
-                        <Badge variant="secondary" className="text-[10px] py-0 px-1.5">
+                        <Badge
+                          variant="secondary"
+                          className={cn(
+                            'text-[10px] py-0 px-1.5 cursor-pointer transition-colors',
+                            typeFilter === c.type
+                              ? 'ring-1 ring-foreground/20'
+                              : 'hover:bg-secondary/80',
+                          )}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            applyTypeFilter(c.type)
+                          }}
+                          title={`Filter by ${c.type}`}
+                        >
                           {c.type}
                         </Badge>
                       </TableCell>
@@ -302,7 +396,7 @@ export function ComponentsPage() {
                       </TableCell>
                       <TableCell>
                         {c.env_coated ? (
-                          <Badge className="text-[10px] py-0 px-1.5 bg-emerald-100 text-emerald-700 hover:bg-emerald-100">
+                          <Badge variant="success" className="text-[10px] py-0 px-1.5">
                             Yes
                           </Badge>
                         ) : (
@@ -319,7 +413,7 @@ export function ComponentsPage() {
 
         <aside
           className={cn(
-            'shrink-0 overflow-hidden',
+            'flex min-h-0 shrink-0 flex-col overflow-hidden',
             transitionsReady && 'transition-[width] duration-300 ease-in-out',
           )}
           style={{ width: panelOpen ? PANEL_WIDTH_PX : 0 }}
@@ -327,20 +421,16 @@ export function ComponentsPage() {
         >
           <div
             className={cn(
-              'flex h-full flex-col bg-background pl-3',
+              'flex h-full min-h-0 flex-col bg-card dark:shadow-[-12px_0_24px_-16px_rgba(0,0,0,0.55)]',
               transitionsReady && 'transition-transform duration-300 ease-in-out',
               panelOpen ? 'translate-x-0' : 'translate-x-full',
             )}
             style={{ width: PANEL_WIDTH_PX }}
           >
             {panelMounted && (
-              <div className="flex min-h-0 flex-1 flex-col border-l">
-                <div className="flex items-center justify-between gap-3 px-6 py-4 border-b">
-                  <h2
-                    className={`text-sm font-medium truncate ${
-                      panel === 'detail' ? 'font-mono' : ''
-                    }`}
-                  >
+              <div className="flex min-h-0 flex-1 flex-col border-l border-border/80">
+                <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/80 px-6 py-4">
+                  <h2 className="truncate text-sm font-medium">
                     {panelTitle}
                   </h2>
                   <div className="flex shrink-0 items-center gap-1">
@@ -365,7 +455,7 @@ export function ComponentsPage() {
                     </Button>
                   </div>
                 </div>
-                <div className="flex-1 overflow-y-auto px-6 py-5">
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-5">
                   {panel === 'create' && (
                     <ComponentForm
                       key="create"
