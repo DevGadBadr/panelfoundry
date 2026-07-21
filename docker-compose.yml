@@ -1,0 +1,16 @@
+services:
+  foundry-pg:
+    image: postgres:16
+    container_name: foundry-pg
+    ports:
+      - "5436:5432"
+    environment:
+      POSTGRES_DB: foundry
+      POSTGRES_USER: foundry
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - foundry_pg_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  foundry_pg_data:
