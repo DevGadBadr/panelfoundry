@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -10,6 +10,8 @@ interface Props {
   isEdit?: boolean
   onSubmit: (data: Partial<Component>) => Promise<unknown>
   onCancel: () => void
+  /** Called whenever form fields change — used to persist drafts. */
+  onChange?: (data: Partial<Component>) => void
 }
 
 const EMPTY: Partial<Component> = {
@@ -23,10 +25,26 @@ const EMPTY: Partial<Component> = {
   env_coated: false,
 }
 
-export function ComponentForm({ initial = EMPTY, isEdit = false, onSubmit, onCancel }: Props) {
+export function ComponentForm({
+  initial = EMPTY,
+  isEdit = false,
+  onSubmit,
+  onCancel,
+  onChange,
+}: Props) {
   const [form, setForm] = useState<Partial<Component>>({ ...EMPTY, ...initial })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+
+  // Persist draft on every change (skip the initial mount snapshot).
+  const [hydrated, setHydrated] = useState(false)
+  useEffect(() => {
+    setHydrated(true)
+  }, [])
+  useEffect(() => {
+    if (!hydrated) return
+    onChange?.(form)
+  }, [form, hydrated, onChange])
 
   const set = (key: keyof Component, value: string | number | boolean | null) =>
     setForm((f) => ({ ...f, [key]: value }))

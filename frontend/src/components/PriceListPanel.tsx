@@ -28,6 +28,12 @@ type PriceForm = {
 
 const EMPTY_PRICE: PriceForm = { price: '', quantity: 1, order_time: '' }
 
+const PRICE_TABLE_WIDTHS = {
+  order_time: 160,
+  price: 88,
+  quantity: 56,
+} as const
+
 export function PriceListPanel({ serialNumber }: Props) {
   const qc = useQueryClient()
   const [adding, setAdding] = useState(false)
@@ -162,22 +168,25 @@ export function PriceListPanel({ serialNumber }: Props) {
       )}
 
       {entries.length > 0 && (
-        <Table>
+        <Table
+          storageKey="foundry.table.price-history"
+          defaultColumnWidths={PRICE_TABLE_WIDTHS}
+        >
           <TableHeader>
             <TableRow className="text-[11px]">
-              <TableHead>Order Date</TableHead>
-              <TableHead className="text-right">Price</TableHead>
-              <TableHead className="text-right">Qty</TableHead>
+              <TableHead columnId="order_time">Order Date</TableHead>
+              <TableHead columnId="price">Price</TableHead>
+              <TableHead columnId="quantity">Qty</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {entries.map((e) => (
               <TableRow key={e.id} className="text-xs">
                 <TableCell className="text-muted-foreground">{fmt(e.order_time)}</TableCell>
-                <TableCell className="text-right font-mono font-medium">
+                <TableCell className="font-mono font-medium">
                   {parseFloat(e.price).toFixed(2)}
                 </TableCell>
-                <TableCell className="text-right text-muted-foreground">{e.quantity}</TableCell>
+                <TableCell className="text-muted-foreground">{e.quantity}</TableCell>
               </TableRow>
             ))}
           </TableBody>
