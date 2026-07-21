@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -156,15 +157,27 @@ export function ComponentForm({
       {field(
         'env_coated',
         'Conformal Coat',
-        <div className="flex items-center h-7">
-          <input
+        <label
+          htmlFor="env_coated"
+          className={`inline-flex h-7 cursor-pointer items-center gap-2.5 rounded-lg border px-2.5 select-none transition-colors ${
+            form.env_coated
+              ? 'border-primary/40 bg-primary/5'
+              : 'border-input bg-transparent hover:bg-muted/50'
+          }`}
+        >
+          <Checkbox
             id="env_coated"
-            type="checkbox"
             checked={form.env_coated ?? false}
-            onChange={(e) => set('env_coated', e.target.checked)}
-            className="h-4 w-4 rounded border-border"
+            onCheckedChange={(checked) => set('env_coated', checked)}
           />
-        </div>,
+          <span
+            className={`text-xs ${
+              form.env_coated ? 'font-medium text-foreground' : 'text-muted-foreground'
+            }`}
+          >
+            {form.env_coated ? 'Coated' : 'Not coated'}
+          </span>
+        </label>,
       )}
       {field(
         'description',

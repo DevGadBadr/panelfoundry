@@ -1,10 +1,13 @@
+import { Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { PriceListPanel } from './PriceListPanel'
 import type { Component } from '@/api/types'
 
 interface Props {
   component: Component
+  onDelete: () => void
 }
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
@@ -16,7 +19,7 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   )
 }
 
-export function ComponentDetail({ component: c }: Props) {
+export function ComponentDetail({ component: c, onDelete }: Props) {
   return (
     <div className="flex flex-col gap-4">
       {/* Metadata */}
@@ -57,6 +60,19 @@ export function ComponentDetail({ component: c }: Props) {
 
       {/* Price History — linked automatically to this component */}
       <PriceListPanel serialNumber={c.serial_number} />
+
+      {/* Destructive action kept away from primary Edit in the header */}
+      <div className="mt-2 border-t pt-4">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 gap-1.5 px-2 text-xs text-muted-foreground hover:text-destructive"
+          onClick={onDelete}
+        >
+          <Trash2 className="h-3 w-3" />
+          Delete component
+        </Button>
+      </div>
     </div>
   )
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Pencil, Trash2, X } from 'lucide-react'
+import { Plus, Pencil, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -31,7 +31,6 @@ const COMPONENTS_TABLE_WIDTHS = {
   dimensions: 96,
   temp: 80,
   coated: 64,
-  actions: 64,
 } as const
 
 const PANEL_WIDTH_PX = 420
@@ -161,15 +160,7 @@ export function ComponentsPage() {
     setPanel('create')
   }
 
-  const openDetail = (c: Component) => {
-    cancelCloseAnimation()
-    setDraft(null)
-    setSelectedSerial(c.serial_number)
-    setPanel('detail')
-  }
-
-  const openEdit = (c: Component, e: React.MouseEvent) => {
-    e.stopPropagation()
+  const openEdit = (c: Component) => {
     cancelCloseAnimation()
     setDraft(null)
     setSelectedSerial(c.serial_number)
@@ -186,13 +177,28 @@ export function ComponentsPage() {
     }, PANEL_TRANSITION_MS)
   }
 
+  const openDetail = (c: Component) => {
+    // Clicking the already-selected row dismisses the panel.
+    if (
+      !panelClosing &&
+      selectedSerial === c.serial_number &&
+      (panel === 'detail' || panel === 'edit')
+    ) {
+      closePanel()
+      return
+    }
+    cancelCloseAnimation()
+    setDraft(null)
+    setSelectedSerial(c.serial_number)
+    setPanel('detail')
+  }
+
   const cancelEdit = () => {
     setDraft(null)
     setPanel('detail')
   }
 
-  const requestDelete = (c: Component, e: React.MouseEvent) => {
-    e.stopPropagation()
+  const requestDelete = (c: Component) => {
     setDeleteTarget(c)
   }
 
@@ -232,14 +238,8 @@ export function ComponentsPage() {
         </Button>
       </div>
 
-      {/* Split: table + inline side panel */}
-      <div
-        className={cn(
-          'flex flex-1 min-h-0 overflow-hidden',
-          panelOpen ? 'gap-3' : 'gap-0',
-          transitionsReady && 'transition-[gap] duration-300 ease-in-out',
-        )}
-      >
+      {/* Split: table + side panel share one continuous bg */}
+      <div className="flex flex-1 min-h-0 overflow-hidden bg-background">
         <div className="flex-1 min-w-0 overflow-x-hidden overflow-y-auto">
           {isLoading && (
             <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">
@@ -264,13 +264,12 @@ export function ComponentsPage() {
                   <TableHead columnId="dimensions">W × H (mm)</TableHead>
                   <TableHead columnId="temp">Temp °C</TableHead>
                   <TableHead columnId="coated">Coated</TableHead>
-                  <TableHead columnId="actions" />
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {components.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center text-xs text-muted-foreground py-8">
+                    <TableCell colSpan={6} className="text-center text-xs text-muted-foreground py-8">
                       No components yet. Add the first one.
                     </TableCell>
                   </TableRow>
@@ -310,26 +309,6 @@ export function ComponentsPage() {
                           <span className="text-muted-foreground">—</span>
                         )}
                       </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6"
-                            onClick={(e) => openEdit(c, e)}
-                          >
-                            <Pencil className="h-3 w-3" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 text-destructive hover:text-destructive"
-                            onClick={(e) => requestDelete(c, e)}
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      </TableCell>
                     </TableRow>
                   )
                 })}
@@ -348,14 +327,14 @@ export function ComponentsPage() {
         >
           <div
             className={cn(
-              'flex h-full flex-col bg-background border-l',
+              'flex h-full flex-col bg-background pl-3',
               transitionsReady && 'transition-transform duration-300 ease-in-out',
               panelOpen ? 'translate-x-0' : 'translate-x-full',
             )}
             style={{ width: PANEL_WIDTH_PX }}
           >
             {panelMounted && (
-              <>
+              <div className="flex min-h-0 flex-1 flex-col border-l">
                 <div className="flex items-center justify-between gap-3 px-6 py-4 border-b">
                   <h2
                     className={`text-sm font-medium truncate ${
@@ -364,15 +343,27 @@ export function ComponentsPage() {
                   >
                     {panelTitle}
                   </h2>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    className="shrink-0"
-                    onClick={closePanel}
-                    aria-label="Close panel"
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
+                  <div className="flex shrink-0 items-center gap-1">
+                    {panel === 'detail' && selected && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 gap-1 text-xs"
+                        onClick={() => openEdit(selected)}
+                      >
+                        <Pencil className="h-3 w-3" />
+                        Edit
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={closePanel}
+                      aria-label="Close panel"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
                 <div className="flex-1 overflow-y-auto px-6 py-5">
                   {panel === 'create' && (
@@ -403,13 +394,16 @@ export function ComponentsPage() {
                   )}
                   {panel === 'detail' && (
                     selected ? (
-                      <ComponentDetail component={selected} />
+                      <ComponentDetail
+                        component={selected}
+                        onDelete={() => requestDelete(selected)}
+                      />
                     ) : (
                       <p className="text-xs text-muted-foreground">Loading…</p>
                     )
                   )}
                 </div>
-              </>
+              </div>
             )}
           </div>
         </aside>
