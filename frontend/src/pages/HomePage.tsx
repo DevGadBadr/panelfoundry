@@ -1,4 +1,5 @@
 import { Construction, CircuitBoard, Layers } from 'lucide-react'
+import { FoundryLogo } from '@/components/FoundryLogo'
 
 export function HomePage() {
   return (
@@ -8,13 +9,7 @@ export function HomePage() {
           className="absolute inset-0 rounded-full bg-muted/60 blur-2xl"
           aria-hidden
         />
-        <div className="relative flex h-20 w-20 items-center justify-center rounded-2xl border border-border bg-card shadow-sm">
-          <Construction
-            className="h-9 w-9 text-foreground/80"
-            strokeWidth={1.5}
-            aria-hidden
-          />
-        </div>
+        <FoundryLogo className="relative h-20 w-20 shadow-sm" />
       </div>
 
       <div className="max-w-md space-y-2">
