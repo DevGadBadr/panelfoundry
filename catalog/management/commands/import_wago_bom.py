@@ -11,6 +11,8 @@ from django.db.models import Max
 from openpyxl import load_workbook
 
 from catalog.models import Component, PriceListEntry
+from catalog.dimensions import parse_whd_from_name
+from catalog.manufacturer import normalize_manufacturer
 
 DATA_START_ROW = 8
 DATA_END_ROW = 93
@@ -22,12 +24,14 @@ class BomRow:
     sheet_row: int
     serial_number: str
     serial_is_generated: bool
+    part_number: str
     name: str
     description: str
     manufacturer: str
     type: str
     width_mm: Decimal | None
     height_mm: Decimal | None
+    depth_mm: Decimal | None
     consumed_dc_current_ma: Decimal | None
     quantity: int | None
     price: Decimal | None
@@ -117,7 +121,7 @@ def parse_bom_workbook(path: Path) -> list[BomRow]:
         part_raw = ws.cell(row, 7).value
         item = str(item_raw).strip() if item_raw else ""
         part = str(part_raw).strip() if part_raw else ""
-        manufacturer = str(ws.cell(row, 3).value or "").strip()
+        manufacturer = normalize_manufacturer(str(ws.cell(row, 3).value or ""))
         price, currency = _pick_price(ws, row)
 
         qty_raw = ws.cell(row, 52).value
@@ -151,17 +155,30 @@ def parse_bom_workbook(path: Path) -> list[BomRow]:
         if price is None:
             flags.append("no_price")
 
+        width_mm = _to_dimension(ws.cell(row, 4).value)
+        height_mm = _to_dimension(ws.cell(row, 5).value)
+        depth_mm = None
+        name_w, name_h, name_d = parse_whd_from_name(item)
+        if width_mm is None and name_w is not None:
+            width_mm = name_w
+        if height_mm is None and name_h is not None:
+            height_mm = name_h
+        if name_d is not None:
+            depth_mm = name_d
+
         rows.append(
             BomRow(
                 sheet_row=row,
                 serial_number=serial_number,
                 serial_is_generated=serial_is_generated,
+                part_number=part,
                 name=item,
                 description=item,
                 manufacturer=manufacturer,
                 type=current_type or "Uncategorized",
-                width_mm=_to_dimension(ws.cell(row, 4).value),
-                height_mm=_to_dimension(ws.cell(row, 5).value),
+                width_mm=width_mm,
+                height_mm=height_mm,
+                depth_mm=depth_mm,
                 consumed_dc_current_ma=_to_current(ws.cell(row, 6).value),
                 quantity=quantity,
                 price=price,
@@ -255,10 +272,12 @@ class Command(BaseCommand):
                 name=row.name,
                 description=row.description,
                 type=row.type,
+                part_number=row.part_number,
                 manufacturer=row.manufacturer,
                 pricelist_id=next_pricelist,
                 width_mm=row.width_mm,
                 height_mm=row.height_mm,
+                depth_mm=row.depth_mm,
                 consumed_dc_current_ma=row.consumed_dc_current_ma,
                 serial_is_generated=row.serial_is_generated,
             )

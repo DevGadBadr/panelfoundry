@@ -3,10 +3,12 @@ export interface Component {
   name: string
   description: string
   type: string
+  part_number: string
   manufacturer: string
   pricelist_id: number
   width_mm: string | null
   height_mm: string | null
+  depth_mm: string | null
   consumed_dc_current_ma: string | null
   env_temp_c: number | null
   env_coated: boolean

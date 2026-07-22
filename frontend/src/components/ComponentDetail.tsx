@@ -5,6 +5,7 @@ import { Separator } from '@/components/ui/separator'
 import { SerialNumberLabel } from '@/components/SerialNumberLabel'
 import { PriceListPanel } from './PriceListPanel'
 import type { Component } from '@/api/types'
+import { formatMm, normalizeManufacturer } from '@/lib/utils'
 
 interface Props {
   component: Component
@@ -21,6 +22,10 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 export function ComponentDetail({ component: c, onDelete }: Props) {
+  const width = formatMm(c.width_mm)
+  const height = formatMm(c.height_mm)
+  const depth = formatMm(c.depth_mm)
+
   return (
     <div className="flex flex-col gap-4">
       <div>
@@ -37,12 +42,15 @@ export function ComponentDetail({ component: c, onDelete }: Props) {
           }
         />
         <Row label="Name" value={c.name} />
-        <Row label="Manufacturer" value={c.manufacturer || null} />
-        <Row label="Type" value={<Badge variant="secondary" className="text-[10px]">{c.type}</Badge>} />
         <Row
-          label="Width × Height"
-          value={c.width_mm && c.height_mm ? `${c.width_mm} × ${c.height_mm} mm` : null}
+          label="Manufacturer"
+          value={normalizeManufacturer(c.manufacturer) || null}
         />
+        <Row label="Type" value={<Badge variant="secondary" className="text-[10px]">{c.type}</Badge>} />
+        <Row label="Part Number" value={c.part_number || null} />
+        <Row label="Width" value={width != null ? `${width} mm` : null} />
+        <Row label="Height" value={height != null ? `${height} mm` : null} />
+        <Row label="Depth" value={depth != null ? `${depth} mm` : null} />
         <Row
           label="Consumed DC Current"
           value={c.consumed_dc_current_ma != null ? `${c.consumed_dc_current_ma} mA` : null}

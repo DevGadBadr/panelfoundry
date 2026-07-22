@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { SerialNumberLabel } from '@/components/SerialNumberLabel'
 import type { Component } from '@/api/types'
+import { normalizeManufacturer } from '@/lib/utils'
 
 interface Props {
   initial?: Partial<Component>
@@ -21,9 +22,11 @@ const EMPTY: Partial<Component> = {
   name: '',
   description: '',
   type: '',
+  part_number: '',
   manufacturer: '',
   width_mm: null,
   height_mm: null,
+  depth_mm: null,
   consumed_dc_current_ma: null,
   env_temp_c: null,
   env_coated: false,
@@ -65,7 +68,10 @@ export function ComponentForm({
     setLoading(true)
     try {
       const { pricelist_id: _ignored, ...payload } = form
-      await onSubmit(payload)
+      await onSubmit({
+        ...payload,
+        manufacturer: normalizeManufacturer(payload.manufacturer),
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error saving component')
     } finally {
@@ -97,8 +103,17 @@ export function ComponentForm({
               id="sn"
               value={form.serial_number ?? ''}
               onChange={(e) => {
-                set('serial_number', e.target.value)
-                set('serial_is_generated', false)
+                const value = e.target.value
+                setForm((f) => ({
+                  ...f,
+                  serial_number: value,
+                  serial_is_generated: false,
+                  // Seed part number from a typed real serial when still empty.
+                  part_number:
+                    !f.part_number || f.part_number === f.serial_number
+                      ? value
+                      : f.part_number,
+                }))
               }}
               disabled={isEdit}
               className="h-7 text-xs flex-1"
@@ -116,6 +131,12 @@ export function ComponentForm({
                     ...f,
                     serial_number: generateSerial(),
                     serial_is_generated: true,
+                    // Leave an already-edited part number alone; clear if it was
+                    // still synced with the previous serial.
+                    part_number:
+                      !f.part_number || f.part_number === f.serial_number
+                        ? ''
+                        : f.part_number,
                   }))
                 }}
               >
@@ -151,6 +172,9 @@ export function ComponentForm({
           id="manufacturer"
           value={form.manufacturer ?? ''}
           onChange={(e) => set('manufacturer', e.target.value)}
+          onBlur={() =>
+            set('manufacturer', normalizeManufacturer(form.manufacturer))
+          }
           className="h-7 text-xs"
           placeholder="optional"
         />,
@@ -165,6 +189,17 @@ export function ComponentForm({
           className="h-7 text-xs"
           required
           placeholder="e.g. CPU, IO, PSU"
+        />,
+      )}
+      {field(
+        'part_number',
+        'Part Number',
+        <Input
+          id="part_number"
+          value={form.part_number ?? ''}
+          onChange={(e) => set('part_number', e.target.value)}
+          className="h-7 text-xs"
+          placeholder="optional"
         />,
       )}
       {field(
@@ -189,6 +224,19 @@ export function ComponentForm({
           step="0.01"
           value={form.height_mm ?? ''}
           onChange={(e) => set('height_mm', e.target.value || null)}
+          className="h-7 text-xs"
+          placeholder="optional"
+        />,
+      )}
+      {field(
+        'depth',
+        'Depth (mm)',
+        <Input
+          id="depth"
+          type="number"
+          step="0.01"
+          value={form.depth_mm ?? ''}
+          onChange={(e) => set('depth_mm', e.target.value || null)}
           className="h-7 text-xs"
           placeholder="optional"
         />,

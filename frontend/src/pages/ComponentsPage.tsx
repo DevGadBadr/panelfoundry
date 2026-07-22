@@ -33,28 +33,58 @@ import {
   type PanelMode,
 } from '@/lib/panelStorage'
 import { usePanelWidth } from '@/hooks/usePanelWidth'
-import { cn } from '@/lib/utils'
+import { cn, formatMm, normalizeManufacturer } from '@/lib/utils'
 
 const COMPONENTS_TABLE_WIDTHS = {
-  serial_number: 180,
   name: 180,
   manufacturer: 112,
   type: 112,
-  dimensions: 96,
+  part_number: 160,
+  width: 72,
+  height: 72,
+  depth: 72,
   temp: 80,
   coated: 64,
 } as const
 
 const PANEL_TRANSITION_MS = 300
 const TYPE_FILTER_ALL = '__all__'
+const MANUFACTURER_FILTER_ALL = '__all__'
+const PAGE_SIZE_OPTIONS = [25, 50, 100] as const
+const DEFAULT_PAGE_SIZE = 50
+const PAGE_WINDOW_SIZE = 4
 
-function matchesComponentSearch(c: Component, query: string): boolean {
-  const q = query.trim().toLowerCase()
-  if (!q) return true
-  return (
-    c.serial_number.toLowerCase().includes(q) ||
-    c.name.toLowerCase().includes(q)
-  )
+type PageItem = number | 'ellipsis'
+
+/** Page numbers with first/last always visible and ellipsis for gaps. */
+function getPaginationItems(
+  current: number,
+  total: number,
+  size = PAGE_WINDOW_SIZE,
+): PageItem[] {
+  if (total <= 0) return []
+  if (total <= size + 2) {
+    return Array.from({ length: total }, (_, i) => i + 1)
+  }
+
+  let start = Math.max(1, current - Math.floor((size - 1) / 2))
+  let end = start + size - 1
+  if (end > total) {
+    end = total
+    start = end - size + 1
+  }
+
+  const items: PageItem[] = []
+  if (start > 1) {
+    items.push(1)
+    if (start > 2) items.push('ellipsis')
+  }
+  for (let i = start; i <= end; i++) items.push(i)
+  if (end < total) {
+    if (end < total - 1) items.push('ellipsis')
+    items.push(total)
+  }
+  return items
 }
 
 const restored = loadPanelState()
@@ -72,46 +102,90 @@ export function ComponentsPage() {
   const [transitionsReady, setTransitionsReady] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Component | null>(null)
   const [typeFilter, setTypeFilter] = useState<string | null>(null)
+  const [manufacturerFilter, setManufacturerFilter] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [searchFocused, setSearchFocused] = useState(false)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE)
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const rowPointerRef = useRef<{ x: number; y: number } | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const splitRef = useRef<HTMLDivElement>(null)
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['components'],
-    queryFn: () => componentsApi.list(),
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchQuery), 300)
+    return () => clearTimeout(t)
+  }, [searchQuery])
+
+  useEffect(() => {
+    setPage(1)
+  }, [typeFilter, manufacturerFilter, debouncedSearch, pageSize])
+
+  const listParams = useMemo(
+    () => ({
+      page,
+      page_size: pageSize,
+      type: typeFilter,
+      manufacturer: manufacturerFilter,
+      search: debouncedSearch,
+    }),
+    [page, pageSize, typeFilter, manufacturerFilter, debouncedSearch],
+  )
+
+  const { data, isLoading, error, isFetching } = useQuery({
+    queryKey: ['components', listParams],
+    queryFn: () => componentsApi.list(listParams),
+    placeholderData: (prev) => prev,
+  })
+
+  const { data: facets } = useQuery({
+    queryKey: ['components', 'facets'],
+    queryFn: () => componentsApi.facets(),
   })
 
   const components = data?.results ?? []
+  const totalCount = data?.count ?? 0
+  const catalogCount = facets?.count ?? totalCount
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
+  const pageItems = getPaginationItems(page, totalPages)
 
-  const availableTypes = useMemo(
-    () =>
-      [...new Set(components.map((c) => c.type).filter(Boolean))].sort((a, b) =>
-        a.localeCompare(b),
-      ),
-    [components],
-  )
+  useEffect(() => {
+    if (!data) return
+    if (page > totalPages) setPage(totalPages)
+  }, [data, page, totalPages])
 
-  const filtered = useMemo(() => {
-    let result = components
-    if (typeFilter) {
-      result = result.filter((c) => c.type === typeFilter)
-    }
-    if (searchQuery.trim()) {
-      result = result.filter((c) => matchesComponentSearch(c, searchQuery))
-    }
-    return result
-  }, [components, typeFilter, searchQuery])
+  const availableTypes = facets?.types ?? []
+  const availableManufacturers = facets?.manufacturers ?? []
 
-  const hasActiveFilters = typeFilter !== null || searchQuery.trim().length > 0
+  const hasActiveFilters =
+    typeFilter !== null ||
+    manufacturerFilter !== null ||
+    searchQuery.trim().length > 0
   const searchExpanded = searchFocused || searchQuery.length > 0
 
-  const selected = useMemo(() => {
+  const selectedFromPage = useMemo(() => {
     if (!selectedSerial) return null
     return components.find((c) => c.serial_number === selectedSerial) ?? null
   }, [components, selectedSerial])
+
+  const needsSelectedFetch =
+    (panel === 'detail' || panel === 'edit') &&
+    !!selectedSerial &&
+    !selectedFromPage
+
+  const {
+    data: selectedFetched,
+    isError: selectedFetchError,
+    isLoading: selectedFetchLoading,
+  } = useQuery({
+    queryKey: ['components', 'detail', selectedSerial],
+    queryFn: () => componentsApi.get(selectedSerial!),
+    enabled: needsSelectedFetch,
+    retry: false,
+  })
+
+  const selected = selectedFromPage ?? (needsSelectedFetch ? selectedFetched ?? null : null)
 
   // Enable CSS transitions after first paint so restored panels don't slide in.
   useEffect(() => {
@@ -153,24 +227,34 @@ export function ComponentsPage() {
     })
   }, [panel, selectedSerial, draft, panelClosing])
 
-  // If restored detail/edit points at a deleted component, drop the panel.
+  // If detail/edit points at a deleted component, drop the panel.
   useEffect(() => {
-    if (isLoading || !data) return
-    if ((panel === 'detail' || panel === 'edit') && selectedSerial && !selected) {
+    if (!needsSelectedFetch || selectedFetchLoading) return
+    if (selectedFetchError) {
       cancelCloseAnimation()
       clearPanelState()
     }
-  }, [isLoading, data, panel, selectedSerial, selected, cancelCloseAnimation, clearPanelState])
+  }, [
+    needsSelectedFetch,
+    selectedFetchLoading,
+    selectedFetchError,
+    cancelCloseAnimation,
+    clearPanelState,
+  ])
 
   const persistDraft = useCallback((next: Partial<Component>) => {
     setDraft(next)
   }, [])
 
+  const invalidateComponents = useCallback(() => {
+    qc.invalidateQueries({ queryKey: ['components'] })
+  }, [qc])
+
   const createMut = useMutation({
     mutationFn: (d: Partial<Component>) =>
       componentsApi.create(d as Omit<Component, 'created_at' | 'updated_at' | 'pricelist_id'>),
     onSuccess: (created) => {
-      qc.invalidateQueries({ queryKey: ['components'] })
+      invalidateComponents()
       cancelCloseAnimation()
       setDraft(null)
       setSelectedSerial(created.serial_number)
@@ -182,7 +266,7 @@ export function ComponentsPage() {
     mutationFn: ({ sn, d }: { sn: string; d: Partial<Omit<Component, 'pricelist_id'>> }) =>
       componentsApi.update(sn, d),
     onSuccess: (updated) => {
-      qc.invalidateQueries({ queryKey: ['components'] })
+      invalidateComponents()
       cancelCloseAnimation()
       setDraft(null)
       setSelectedSerial(updated.serial_number)
@@ -193,7 +277,7 @@ export function ComponentsPage() {
   const deleteMut = useMutation({
     mutationFn: (sn: string) => componentsApi.delete(sn),
     onSuccess: (_data, sn) => {
-      qc.invalidateQueries({ queryKey: ['components'] })
+      invalidateComponents()
       setDeleteTarget(null)
       if (selectedSerial === sn) {
         cancelCloseAnimation()
@@ -201,6 +285,10 @@ export function ComponentsPage() {
       }
     },
   })
+
+  const rangeStart = totalCount === 0 ? 0 : (page - 1) * pageSize + 1
+  const rangeEnd = Math.min(page * pageSize, totalCount)
+  const showPager = !isLoading && !error && totalPages > 1
 
   const panelMounted = panel !== null
   const panelOpen = panelMounted && !panelClosing
@@ -300,16 +388,42 @@ export function ComponentsPage() {
 
   const applyTypeFilter = (type: string) => {
     setTypeFilter(type)
+    setPage(1)
+  }
+
+  const applyManufacturerFilter = (manufacturer: string) => {
+    setManufacturerFilter(manufacturer)
+    setPage(1)
   }
 
   const clearAllFilters = () => {
     setTypeFilter(null)
+    setManufacturerFilter(null)
     setSearchQuery('')
+    setPage(1)
   }
 
   const clearTypeFilter = () => {
     setTypeFilter(null)
+    setPage(1)
   }
+
+  const clearManufacturerFilter = () => {
+    setManufacturerFilter(null)
+    setPage(1)
+  }
+
+  const emptyFilterMessage = (() => {
+    const parts: string[] = []
+    if (searchQuery.trim()) parts.push('search')
+    if (typeFilter) parts.push('type')
+    if (manufacturerFilter) parts.push('manufacturer')
+    if (parts.length > 1) return ' your current filters'
+    if (searchQuery.trim()) return ' your search'
+    if (typeFilter) return ` type “${typeFilter}”`
+    if (manufacturerFilter) return ` manufacturer “${manufacturerFilter}”`
+    return ' your filters'
+  })()
 
   const panelTitle =
     panel === 'create'
@@ -342,11 +456,96 @@ export function ComponentsPage() {
           <h1 className="text-base font-semibold">Components</h1>
           <p className="text-xs text-muted-foreground">
             {hasActiveFilters
-              ? `${filtered.length} of ${data?.count ?? 0} components`
-              : `${data?.count ?? 0} components in catalog`}
+              ? `${totalCount} of ${catalogCount} components`
+              : `${catalogCount} components in catalog`}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-muted-foreground">Show</span>
+            <Select
+              value={String(pageSize)}
+              onValueChange={(value) => {
+                setPageSize(Number(value))
+                setPage(1)
+              }}
+            >
+              <SelectTrigger
+                size="sm"
+                className="h-7 w-[4.25rem] gap-1 border-input bg-transparent px-2 text-xs shadow-none dark:bg-input/30"
+                aria-label="Rows per page"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="end">
+                {PAGE_SIZE_OPTIONS.map((size) => (
+                  <SelectItem key={size} value={String(size)}>
+                    {size}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-muted-foreground">Manufacturer</span>
+            <div
+              className={cn(
+                'flex items-stretch overflow-hidden rounded-[min(var(--radius-md),12px)] border border-input bg-transparent dark:bg-input/30',
+                manufacturerFilter && 'pr-0',
+              )}
+            >
+              <Select
+                value={manufacturerFilter ?? MANUFACTURER_FILTER_ALL}
+                onValueChange={(value) => {
+                  setManufacturerFilter(
+                    value === MANUFACTURER_FILTER_ALL ? null : (value as string),
+                  )
+                  setPage(1)
+                }}
+              >
+                <SelectTrigger
+                  size="sm"
+                  className={cn(
+                    'h-7 w-[7.25rem] max-w-[7.25rem] min-w-0 gap-1.5 border-0 bg-transparent px-2 text-xs shadow-none focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent',
+                    manufacturerFilter &&
+                      'rounded-none rounded-l-[min(var(--radius-md),12px)]',
+                  )}
+                  aria-label="Select component manufacturer"
+                >
+                  <SelectValue
+                    placeholder="All"
+                    className="min-w-0 truncate text-left"
+                  >
+                    {(value) =>
+                      !value || value === MANUFACTURER_FILTER_ALL
+                        ? 'All'
+                        : String(value)
+                    }
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent align="end">
+                  <SelectItem value={MANUFACTURER_FILTER_ALL}>All</SelectItem>
+                  {availableManufacturers.map((manufacturer) => (
+                    <SelectItem key={manufacturer} value={manufacturer}>
+                      {manufacturer}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {manufacturerFilter && (
+                <button
+                  type="button"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center border-l border-input text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  onClick={clearManufacturerFilter}
+                  aria-label={`Clear manufacturer filter: ${manufacturerFilter}`}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+
           <div className="flex items-center gap-1.5">
             <span className="text-xs text-muted-foreground">Type</span>
             <div
@@ -357,9 +556,10 @@ export function ComponentsPage() {
             >
               <Select
                 value={typeFilter ?? TYPE_FILTER_ALL}
-                onValueChange={(value) =>
+                onValueChange={(value) => {
                   setTypeFilter(value === TYPE_FILTER_ALL ? null : (value as string))
-                }
+                  setPage(1)
+                }}
               >
                 <SelectTrigger
                   size="sm"
@@ -458,7 +658,7 @@ export function ComponentsPage() {
         ref={splitRef}
         className="flex flex-1 min-h-0 overflow-hidden bg-background"
       >
-        <div className="flex-1 min-w-0 overflow-x-hidden overflow-y-auto">
+        <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
           {isLoading && (
             <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">
               Loading…
@@ -470,39 +670,36 @@ export function ComponentsPage() {
             </div>
           )}
           {!isLoading && !error && (
+            <>
             <Table
               storageKey="foundry.table.components"
               defaultColumnWidths={COMPONENTS_TABLE_WIDTHS}
             >
               <TableHeader>
                 <TableRow className="text-xs">
-                  <TableHead columnId="serial_number">Serial Number</TableHead>
                   <TableHead columnId="name">Name</TableHead>
                   <TableHead columnId="manufacturer">Manufacturer</TableHead>
                   <TableHead columnId="type">Type</TableHead>
-                  <TableHead columnId="dimensions">W × H (mm)</TableHead>
+                  <TableHead columnId="part_number">Part Number</TableHead>
+                  <TableHead columnId="width">Width</TableHead>
+                  <TableHead columnId="height">Height</TableHead>
+                  <TableHead columnId="depth">Depth</TableHead>
                   <TableHead columnId="temp">Temp °C</TableHead>
                   <TableHead columnId="coated">Coated</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {components.length === 0 && (
+                {totalCount === 0 && !hasActiveFilters && (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center text-xs text-muted-foreground py-8">
+                    <TableCell colSpan={9} className="text-center text-xs text-muted-foreground py-8">
                       No components yet. Add the first one.
                     </TableCell>
                   </TableRow>
                 )}
-                {components.length > 0 && filtered.length === 0 && (
+                {totalCount === 0 && hasActiveFilters && (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center text-xs text-muted-foreground py-8">
-                      No components match
-                      {searchQuery.trim() && typeFilter
-                        ? ' your search and type filter'
-                        : searchQuery.trim()
-                          ? ' your search'
-                          : ` type “${typeFilter}”`}
-                      .{' '}
+                    <TableCell colSpan={9} className="text-center text-xs text-muted-foreground py-8">
+                      No components match{emptyFilterMessage}.{' '}
                       <button
                         type="button"
                         className="underline underline-offset-2 hover:text-foreground"
@@ -513,7 +710,7 @@ export function ComponentsPage() {
                     </TableCell>
                   </TableRow>
                 )}
-                {filtered.map((c) => {
+                {components.map((c) => {
                   const isSelected =
                     panel !== 'create' && selectedSerial === c.serial_number && panelOpen
                   return (
@@ -525,25 +722,39 @@ export function ComponentsPage() {
                       onPointerDown={onRowPointerDown}
                       onClick={(e) => onRowClick(e, c)}
                     >
-                      <TableCell>
-                        <SerialNumberLabel
-                          serial={c.serial_number}
-                          isGenerated={c.serial_is_generated}
-                          className="text-xs"
-                        />
-                      </TableCell>
                       <TableCell>{c.name}</TableCell>
                       <TableCell className="text-muted-foreground">
-                        {c.manufacturer || '—'}
+                        {c.manufacturer ? (
+                          <button
+                            type="button"
+                            className={cn(
+                              'text-left transition-colors hover:text-foreground',
+                              manufacturerFilter ===
+                                normalizeManufacturer(c.manufacturer) &&
+                                'font-medium text-foreground underline underline-offset-2',
+                            )}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              applyManufacturerFilter(
+                                normalizeManufacturer(c.manufacturer),
+                              )
+                            }}
+                            title={`Filter by ${normalizeManufacturer(c.manufacturer)}`}
+                          >
+                            {normalizeManufacturer(c.manufacturer)}
+                          </button>
+                        ) : (
+                          '—'
+                        )}
                       </TableCell>
                       <TableCell>
                         <Badge
-                          variant="secondary"
+                          variant="outline"
                           className={cn(
-                            'text-[10px] py-0 px-1.5 cursor-pointer transition-colors',
+                            'text-[10px] py-0 px-1.5 bg-transparent hover:bg-transparent cursor-pointer transition-colors rounded-md',
                             typeFilter === c.type
-                              ? 'ring-1 ring-foreground/20'
-                              : 'hover:bg-secondary/80',
+                              ? 'border-foreground/40'
+                              : 'hover:border-foreground/30',
                           )}
                           onClick={(e) => {
                             e.stopPropagation()
@@ -554,10 +765,17 @@ export function ComponentsPage() {
                           {c.type}
                         </Badge>
                       </TableCell>
+                      <TableCell className="font-mono text-muted-foreground">
+                        {c.part_number || '—'}
+                      </TableCell>
                       <TableCell className="text-muted-foreground">
-                        {c.width_mm && c.height_mm
-                          ? `${c.width_mm} × ${c.height_mm}`
-                          : '—'}
+                        {formatMm(c.width_mm) ?? '—'}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {formatMm(c.height_mm) ?? '—'}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {formatMm(c.depth_mm) ?? '—'}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {c.env_temp_c != null ? c.env_temp_c : '—'}
@@ -576,6 +794,55 @@ export function ComponentsPage() {
                 })}
               </TableBody>
             </Table>
+
+            {totalCount > 0 && (
+              <div
+                className={cn(
+                  'flex items-center justify-between gap-3 border-t border-border/80 px-4 py-2',
+                  isFetching && 'opacity-70',
+                )}
+              >
+                <p className="text-xs text-muted-foreground tabular-nums">
+                  {rangeStart}–{rangeEnd} of {totalCount}
+                  <span className="text-border mx-1.5">·</span>
+                  {components.length} on page
+                </p>
+                {showPager && (
+                  <nav
+                    className="flex items-center gap-0.5"
+                    aria-label="Pagination"
+                  >
+                    {pageItems.map((item, index) =>
+                      item === 'ellipsis' ? (
+                        <span
+                          key={`ellipsis-${index}`}
+                          className="flex h-7 min-w-7 items-center justify-center px-1 text-xs text-muted-foreground"
+                          aria-hidden
+                        >
+                          …
+                        </span>
+                      ) : (
+                        <Button
+                          key={item}
+                          type="button"
+                          variant={item === page ? 'outline' : 'ghost'}
+                          size="sm"
+                          className={cn(
+                            'h-7 min-w-7 px-1.5 text-xs tabular-nums',
+                            item === page && 'pointer-events-none',
+                          )}
+                          aria-current={item === page ? 'page' : undefined}
+                          onClick={() => setPage(item)}
+                        >
+                          {item}
+                        </Button>
+                      ),
+                    )}
+                  </nav>
+                )}
+              </div>
+            )}
+            </>
           )}
         </div>
 

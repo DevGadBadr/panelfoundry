@@ -1,15 +1,19 @@
 from django.db import models
 
+from .manufacturer import normalize_manufacturer
+
 
 class Component(models.Model):
     serial_number = models.CharField(max_length=50, primary_key=True)
     name = models.CharField(max_length=250)
     description = models.TextField(blank=True)
     type = models.CharField(max_length=100)
+    part_number = models.CharField(max_length=100, blank=True, default="")
     manufacturer = models.CharField(max_length=100, blank=True)
     pricelist_id = models.IntegerField(db_index=True)
     width_mm = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     height_mm = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    depth_mm = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     consumed_dc_current_ma = models.DecimalField(
         max_digits=10, decimal_places=2, null=True, blank=True
     )
@@ -21,6 +25,10 @@ class Component(models.Model):
 
     class Meta:
         ordering = ["serial_number"]
+
+    def save(self, *args, **kwargs):
+        self.manufacturer = normalize_manufacturer(self.manufacturer)
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.serial_number} — {self.name}"

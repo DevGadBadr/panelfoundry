@@ -5,10 +5,10 @@ from .models import Component, PriceListEntry
 @admin.register(Component)
 class ComponentAdmin(admin.ModelAdmin):
     list_display = [
-        "serial_number", "name", "manufacturer", "type", "pricelist_id",
-        "serial_is_generated", "env_coated", "updated_at",
+        "serial_number", "part_number", "name", "manufacturer", "type",
+        "pricelist_id", "serial_is_generated", "env_coated", "updated_at",
     ]
-    search_fields = ["serial_number", "name", "type", "manufacturer"]
+    search_fields = ["serial_number", "part_number", "name", "type", "manufacturer"]
     list_filter = ["type", "env_coated", "serial_is_generated"]
 
 
