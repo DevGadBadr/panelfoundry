@@ -16,4 +16,9 @@ export const componentsApi = {
     sn: string,
     data: Pick<PriceListEntry, 'price' | 'quantity' | 'order_time'>,
   ) => api.post<PriceListEntry>(`/api/components/${sn}/prices/`, data),
+  updatePrice: (
+    id: number,
+    data: Pick<PriceListEntry, 'price' | 'quantity' | 'order_time'>,
+  ) => api.patch<PriceListEntry>(`/api/prices/${id}/`, data),
+  deletePrice: (id: number) => api.delete(`/api/prices/${id}/`),
 }

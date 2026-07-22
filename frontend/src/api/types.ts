@@ -18,6 +18,7 @@ export interface PriceListEntry {
   component_id: string
   price: string
   quantity: number
+  total: string
   order_time: string
   created_at: string
 }

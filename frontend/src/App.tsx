@@ -15,7 +15,7 @@ export default function App() {
           {/* Top nav */}
           <header className="flex shrink-0 items-center gap-3 border-b border-border/80 bg-background px-4 py-2">
             <span className="text-sm font-bold tracking-tight">Foundry</span>
-            <span className="text-xs text-muted-foreground">PLC Component Catalog</span>
+            <span className="text-xs text-muted-foreground">PLC Panel Builder</span>
             <div className="ml-auto">
               <ThemeSwitcher />
             </div>

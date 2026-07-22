@@ -11,7 +11,8 @@ class ComponentAdmin(admin.ModelAdmin):
 
 @admin.register(PriceListEntry)
 class PriceListEntryAdmin(admin.ModelAdmin):
-    list_display = ["id", "component", "pricelist_id", "price", "quantity", "order_time"]
+    list_display = ["id", "component", "pricelist_id", "price", "quantity", "total", "order_time"]
+    readonly_fields = ["total"]
     search_fields = ["component__serial_number", "component__name"]
     list_filter = ["pricelist_id"]
     ordering = ["-order_time"]

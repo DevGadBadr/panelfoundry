@@ -4,11 +4,15 @@ from .models import Component, PriceListEntry
 
 class PriceListEntrySerializer(serializers.ModelSerializer):
     component_id = serializers.CharField(read_only=True)
+    total = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
 
     class Meta:
         model = PriceListEntry
-        fields = ["id", "pricelist_id", "component_id", "price", "quantity", "order_time", "created_at"]
-        read_only_fields = ["id", "pricelist_id", "created_at"]
+        fields = [
+            "id", "pricelist_id", "component_id", "price", "quantity",
+            "total", "order_time", "created_at",
+        ]
+        read_only_fields = ["id", "pricelist_id", "total", "created_at"]
 
 
 class ComponentSerializer(serializers.ModelSerializer):
