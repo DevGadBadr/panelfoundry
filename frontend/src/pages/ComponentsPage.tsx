@@ -1,9 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Pencil, X } from 'lucide-react'
+import { Plus, Pencil, X, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   Table,
   TableBody,
@@ -16,6 +24,7 @@ import { PopupModal } from '@/components/ui/popup-modal'
 import { DialogFooter } from '@/components/ui/dialog'
 import { ComponentForm } from '@/components/ComponentForm'
 import { ComponentDetail } from '@/components/ComponentDetail'
+import { SerialNumberLabel } from '@/components/SerialNumberLabel'
 import { componentsApi } from '@/api/components'
 import type { Component } from '@/api/types'
 import {
@@ -23,19 +32,30 @@ import {
   savePanelState,
   type PanelMode,
 } from '@/lib/panelStorage'
+import { usePanelWidth } from '@/hooks/usePanelWidth'
 import { cn } from '@/lib/utils'
 
 const COMPONENTS_TABLE_WIDTHS = {
-  serial_number: 144,
-  name: 200,
+  serial_number: 180,
+  name: 180,
+  manufacturer: 112,
   type: 112,
   dimensions: 96,
   temp: 80,
   coated: 64,
 } as const
 
-const PANEL_WIDTH_PX = 420
 const PANEL_TRANSITION_MS = 300
+const TYPE_FILTER_ALL = '__all__'
+
+function matchesComponentSearch(c: Component, query: string): boolean {
+  const q = query.trim().toLowerCase()
+  if (!q) return true
+  return (
+    c.serial_number.toLowerCase().includes(q) ||
+    c.name.toLowerCase().includes(q)
+  )
+}
 
 const restored = loadPanelState()
 
@@ -52,8 +72,12 @@ export function ComponentsPage() {
   const [transitionsReady, setTransitionsReady] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Component | null>(null)
   const [typeFilter, setTypeFilter] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchFocused, setSearchFocused] = useState(false)
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const rowPointerRef = useRef<{ x: number; y: number } | null>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const splitRef = useRef<HTMLDivElement>(null)
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['components'],
@@ -62,10 +86,27 @@ export function ComponentsPage() {
 
   const components = data?.results ?? []
 
-  const filtered = useMemo(
-    () => (typeFilter ? components.filter((c) => c.type === typeFilter) : components),
-    [components, typeFilter],
+  const availableTypes = useMemo(
+    () =>
+      [...new Set(components.map((c) => c.type).filter(Boolean))].sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    [components],
   )
+
+  const filtered = useMemo(() => {
+    let result = components
+    if (typeFilter) {
+      result = result.filter((c) => c.type === typeFilter)
+    }
+    if (searchQuery.trim()) {
+      result = result.filter((c) => matchesComponentSearch(c, searchQuery))
+    }
+    return result
+  }, [components, typeFilter, searchQuery])
+
+  const hasActiveFilters = typeFilter !== null || searchQuery.trim().length > 0
+  const searchExpanded = searchFocused || searchQuery.length > 0
 
   const selected = useMemo(() => {
     if (!selectedSerial) return null
@@ -161,8 +202,20 @@ export function ComponentsPage() {
     },
   })
 
+  const panelMounted = panel !== null
+  const panelOpen = panelMounted && !panelClosing
+
+  const {
+    panelWidth,
+    canResize,
+    isResizing,
+    startResize,
+    resetWidth,
+  } = usePanelWidth(splitRef, panelOpen)
+
   const openCreate = () => {
     cancelCloseAnimation()
+    resetWidth()
     setSelectedSerial(null)
     setDraft(null)
     setPanel('create')
@@ -170,6 +223,7 @@ export function ComponentsPage() {
 
   const openEdit = (c: Component) => {
     cancelCloseAnimation()
+    resetWidth()
     setDraft(null)
     setSelectedSerial(c.serial_number)
     setPanel('edit')
@@ -196,6 +250,7 @@ export function ComponentsPage() {
       return
     }
     cancelCloseAnimation()
+    resetWidth()
     setDraft(null)
     setSelectedSerial(c.serial_number)
     setPanel('detail')
@@ -247,13 +302,15 @@ export function ComponentsPage() {
     setTypeFilter(type)
   }
 
+  const clearAllFilters = () => {
+    setTypeFilter(null)
+    setSearchQuery('')
+  }
+
   const clearTypeFilter = () => {
     setTypeFilter(null)
   }
 
-  // Keep panel mounted while closing so the slide-out can finish.
-  const panelMounted = panel !== null
-  const panelOpen = panelMounted && !panelClosing
   const panelTitle =
     panel === 'create'
       ? 'New Component'
@@ -262,6 +319,15 @@ export function ComponentsPage() {
           ? `Edit — ${selected.name}`
           : 'Edit'
         : selected?.name ?? ''
+
+  const panelSubtitle =
+    panel === 'detail' && selected ? (
+      <SerialNumberLabel
+        serial={selected.serial_number}
+        isGenerated={selected.serial_is_generated}
+        className="text-xs text-muted-foreground"
+      />
+    ) : null
 
   // Form initial: prefer persisted draft over live component.
   const formInitial =
@@ -275,28 +341,111 @@ export function ComponentsPage() {
         <div className="min-w-0">
           <h1 className="text-base font-semibold">Components</h1>
           <p className="text-xs text-muted-foreground">
-            {typeFilter
+            {hasActiveFilters
               ? `${filtered.length} of ${data?.count ?? 0} components`
               : `${data?.count ?? 0} components in catalog`}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {typeFilter && (
-            <Badge
-              variant="secondary"
-              className="h-7 gap-1.5 rounded-md px-2 text-xs font-normal"
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-muted-foreground">Type</span>
+            <div
+              className={cn(
+                'flex items-stretch overflow-hidden rounded-[min(var(--radius-md),12px)] border border-input bg-transparent dark:bg-input/30',
+                typeFilter && 'pr-0',
+              )}
             >
-              Type: {typeFilter}
+              <Select
+                value={typeFilter ?? TYPE_FILTER_ALL}
+                onValueChange={(value) =>
+                  setTypeFilter(value === TYPE_FILTER_ALL ? null : (value as string))
+                }
+              >
+                <SelectTrigger
+                  size="sm"
+                  className={cn(
+                    'h-7 w-[7.25rem] max-w-[7.25rem] min-w-0 gap-1.5 border-0 bg-transparent px-2 text-xs shadow-none focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent',
+                    typeFilter && 'rounded-none rounded-l-[min(var(--radius-md),12px)]',
+                  )}
+                  aria-label="Select component type"
+                >
+                  <SelectValue
+                    placeholder="All"
+                    className="min-w-0 truncate text-left"
+                  >
+                    {(value) =>
+                      !value || value === TYPE_FILTER_ALL ? 'All' : String(value)
+                    }
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent align="end">
+                  <SelectItem value={TYPE_FILTER_ALL}>All</SelectItem>
+                  {availableTypes.map((type) => (
+                    <SelectItem key={type} value={type}>
+                      {type}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {typeFilter && (
+                <button
+                  type="button"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center border-l border-input text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  onClick={clearTypeFilter}
+                  aria-label={`Clear type filter: ${typeFilter}`}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div
+            className={cn(
+              'relative flex h-7 items-center gap-1.5 overflow-hidden rounded-[min(var(--radius-md),12px)] border border-input bg-transparent px-2 transition-[width] duration-200 ease-out dark:bg-input/30',
+              searchExpanded
+                ? 'w-52'
+                : 'w-[5.25rem] cursor-pointer hover:bg-muted/50 dark:hover:bg-input/50',
+            )}
+            onClick={() => {
+              if (!searchExpanded) searchInputRef.current?.focus()
+            }}
+          >
+            <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            {!searchExpanded && (
+              <span className="text-xs text-muted-foreground select-none">Search</span>
+            )}
+            <Input
+              ref={searchInputRef}
+              type="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onFocus={() => setSearchFocused(true)}
+              onBlur={() => setSearchFocused(false)}
+              placeholder="Serial or name…"
+              className={cn(
+                'h-7 border-0 bg-transparent p-0 text-xs shadow-none focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent',
+                searchExpanded ? 'min-w-0 flex-1' : 'sr-only',
+              )}
+              aria-label="Search components by serial number or name"
+            />
+            {searchExpanded && searchQuery && (
               <button
                 type="button"
-                className="rounded-sm opacity-70 hover:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                onClick={clearTypeFilter}
-                aria-label={`Clear type filter ${typeFilter}`}
+                className="shrink-0 rounded-sm p-0.5 text-muted-foreground opacity-70 hover:text-foreground hover:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setSearchQuery('')
+                  searchInputRef.current?.focus()
+                }}
+                aria-label="Clear search"
               >
                 <X className="h-3 w-3" />
               </button>
-            </Badge>
-          )}
+            )}
+          </div>
+
           <Button size="sm" className="h-7 gap-1 text-xs" onClick={openCreate}>
             <Plus className="h-3.5 w-3.5" />
             Add Component
@@ -305,7 +454,10 @@ export function ComponentsPage() {
       </div>
 
       {/* Split: table + side panel share one continuous bg */}
-      <div className="flex flex-1 min-h-0 overflow-hidden bg-background">
+      <div
+        ref={splitRef}
+        className="flex flex-1 min-h-0 overflow-hidden bg-background"
+      >
         <div className="flex-1 min-w-0 overflow-x-hidden overflow-y-auto">
           {isLoading && (
             <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">
@@ -326,6 +478,7 @@ export function ComponentsPage() {
                 <TableRow className="text-xs">
                   <TableHead columnId="serial_number">Serial Number</TableHead>
                   <TableHead columnId="name">Name</TableHead>
+                  <TableHead columnId="manufacturer">Manufacturer</TableHead>
                   <TableHead columnId="type">Type</TableHead>
                   <TableHead columnId="dimensions">W × H (mm)</TableHead>
                   <TableHead columnId="temp">Temp °C</TableHead>
@@ -335,21 +488,27 @@ export function ComponentsPage() {
               <TableBody>
                 {components.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center text-xs text-muted-foreground py-8">
+                    <TableCell colSpan={7} className="text-center text-xs text-muted-foreground py-8">
                       No components yet. Add the first one.
                     </TableCell>
                   </TableRow>
                 )}
                 {components.length > 0 && filtered.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center text-xs text-muted-foreground py-8">
-                      No components match type “{typeFilter}”.{' '}
+                    <TableCell colSpan={7} className="text-center text-xs text-muted-foreground py-8">
+                      No components match
+                      {searchQuery.trim() && typeFilter
+                        ? ' your search and type filter'
+                        : searchQuery.trim()
+                          ? ' your search'
+                          : ` type “${typeFilter}”`}
+                      .{' '}
                       <button
                         type="button"
                         className="underline underline-offset-2 hover:text-foreground"
-                        onClick={clearTypeFilter}
+                        onClick={clearAllFilters}
                       >
-                        Clear filter
+                        Clear filters
                       </button>
                     </TableCell>
                   </TableRow>
@@ -366,8 +525,17 @@ export function ComponentsPage() {
                       onPointerDown={onRowPointerDown}
                       onClick={(e) => onRowClick(e, c)}
                     >
-                      <TableCell className="font-mono font-medium">{c.serial_number}</TableCell>
+                      <TableCell>
+                        <SerialNumberLabel
+                          serial={c.serial_number}
+                          isGenerated={c.serial_is_generated}
+                          className="text-xs"
+                        />
+                      </TableCell>
                       <TableCell>{c.name}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {c.manufacturer || '—'}
+                      </TableCell>
                       <TableCell>
                         <Badge
                           variant="secondary"
@@ -414,25 +582,36 @@ export function ComponentsPage() {
         <aside
           className={cn(
             'flex min-h-0 shrink-0 flex-col overflow-hidden',
-            transitionsReady && 'transition-[width] duration-300 ease-in-out',
+            transitionsReady &&
+              !isResizing &&
+              'transition-[width] duration-300 ease-in-out',
           )}
-          style={{ width: panelOpen ? PANEL_WIDTH_PX : 0 }}
+          style={{ width: panelOpen ? panelWidth : 0 }}
           aria-hidden={!panelOpen}
         >
           <div
             className={cn(
-              'flex h-full min-h-0 flex-col bg-card dark:shadow-[-12px_0_24px_-16px_rgba(0,0,0,0.55)]',
+              'relative flex h-full min-h-0 flex-col bg-card dark:shadow-[-12px_0_24px_-16px_rgba(0,0,0,0.55)]',
               transitionsReady && 'transition-transform duration-300 ease-in-out',
               panelOpen ? 'translate-x-0' : 'translate-x-full',
             )}
-            style={{ width: PANEL_WIDTH_PX }}
+            style={{ width: panelWidth }}
           >
+            {panelOpen && canResize && (
+              <PanelResizeHandle
+                active={isResizing}
+                onDragStart={startResize}
+              />
+            )}
             {panelMounted && (
               <div className="flex min-h-0 flex-1 flex-col border-l border-border/80">
                 <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/80 px-6 py-4">
-                  <h2 className="truncate text-sm font-medium">
-                    {panelTitle}
-                  </h2>
+                  <div className="min-w-0">
+                    <h2 className="truncate text-sm font-medium">
+                      {panelTitle}
+                    </h2>
+                    {panelSubtitle}
+                  </div>
                   <div className="flex shrink-0 items-center gap-1">
                     {panel === 'detail' && selected && (
                       <Button
@@ -507,7 +686,17 @@ export function ComponentsPage() {
         title="Delete component?"
         description={
           deleteTarget
-            ? `This will permanently delete ${deleteTarget.serial_number}. This action cannot be undone.`
+            ? (
+                <span>
+                  This will permanently delete{' '}
+                  <SerialNumberLabel
+                    serial={deleteTarget.serial_number}
+                    isGenerated={deleteTarget.serial_is_generated}
+                    className="inline-flex"
+                  />
+                  . This action cannot be undone.
+                </span>
+              )
             : undefined
         }
         size="sm"
@@ -532,5 +721,33 @@ export function ComponentsPage() {
         </DialogFooter>
       </PopupModal>
     </div>
+  )
+}
+
+function PanelResizeHandle({
+  active,
+  onDragStart,
+}: {
+  active: boolean
+  onDragStart: (clientX: number) => void
+}) {
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize panel"
+      data-slot="panel-resize-handle"
+      className={cn(
+        'absolute top-0 left-0 z-10 h-full w-2.5 -translate-x-1/2 cursor-col-resize touch-none select-none',
+        'after:pointer-events-none after:absolute after:inset-y-1.5 after:left-1/2 after:w-px after:-translate-x-1/2 after:rounded-full after:bg-border/50 after:transition-colors',
+        'hover:after:bg-foreground/20',
+        active && 'after:bg-foreground/30',
+      )}
+      onMouseDown={(event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        onDragStart(event.clientX)
+      }}
+    />
   )
 }

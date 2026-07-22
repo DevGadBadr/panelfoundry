@@ -6,11 +6,16 @@ class Component(models.Model):
     name = models.CharField(max_length=250)
     description = models.TextField(blank=True)
     type = models.CharField(max_length=100)
+    manufacturer = models.CharField(max_length=100, blank=True)
     pricelist_id = models.IntegerField(db_index=True)
     width_mm = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     height_mm = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    consumed_dc_current_ma = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True
+    )
     env_temp_c = models.IntegerField(null=True, blank=True)
     env_coated = models.BooleanField(default=False)
+    serial_is_generated = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -22,6 +27,10 @@ class Component(models.Model):
 
 
 class PriceListEntry(models.Model):
+    class Currency(models.TextChoices):
+        EUR = "EUR", "EUR"
+        USD = "USD", "USD"
+
     pricelist_id = models.IntegerField(db_index=True)
     component = models.ForeignKey(
         Component,
@@ -30,6 +39,9 @@ class PriceListEntry(models.Model):
     )
     price = models.DecimalField(max_digits=12, decimal_places=2)
     quantity = models.PositiveIntegerField()
+    currency = models.CharField(
+        max_length=3, choices=Currency.choices, default=Currency.EUR
+    )
     order_time = models.DateField()
     created_at = models.DateTimeField(auto_now_add=True)
 

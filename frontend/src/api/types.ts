@@ -3,14 +3,19 @@ export interface Component {
   name: string
   description: string
   type: string
+  manufacturer: string
   pricelist_id: number
   width_mm: string | null
   height_mm: string | null
+  consumed_dc_current_ma: string | null
   env_temp_c: number | null
   env_coated: boolean
+  serial_is_generated: boolean
   created_at: string
   updated_at: string
 }
+
+export type Currency = 'EUR' | 'USD'
 
 export interface PriceListEntry {
   id: number
@@ -18,6 +23,7 @@ export interface PriceListEntry {
   component_id: string
   price: string
   quantity: number
+  currency: Currency
   total: string
   order_time: string
   created_at: string

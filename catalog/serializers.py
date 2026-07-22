@@ -10,7 +10,7 @@ class PriceListEntrySerializer(serializers.ModelSerializer):
         model = PriceListEntry
         fields = [
             "id", "pricelist_id", "component_id", "price", "quantity",
-            "total", "order_time", "created_at",
+            "currency", "total", "order_time", "created_at",
         ]
         read_only_fields = ["id", "pricelist_id", "total", "created_at"]
 
@@ -19,11 +19,18 @@ class ComponentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Component
         fields = [
-            "serial_number", "name", "description", "type", "pricelist_id",
-            "width_mm", "height_mm", "env_temp_c", "env_coated",
+            "serial_number", "name", "description", "type", "manufacturer",
+            "pricelist_id", "width_mm", "height_mm", "consumed_dc_current_ma",
+            "env_temp_c", "env_coated", "serial_is_generated",
             "created_at", "updated_at",
         ]
         read_only_fields = ["pricelist_id", "created_at", "updated_at"]
+
+    def get_extra_kwargs(self):
+        kwargs = super().get_extra_kwargs()
+        if self.instance is not None:
+            kwargs.setdefault("serial_is_generated", {})["read_only"] = True
+        return kwargs
 
 
 class ComponentDetailSerializer(ComponentSerializer):

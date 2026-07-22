@@ -16,7 +16,7 @@ import { Separator } from '@/components/ui/separator'
 import { PopupModal } from '@/components/ui/popup-modal'
 import { DialogFooter } from '@/components/ui/dialog'
 import { componentsApi } from '@/api/components'
-import type { PriceListEntry } from '@/api/types'
+import type { Currency, PriceListEntry } from '@/api/types'
 import { cn } from '@/lib/utils'
 
 interface Props {
@@ -27,9 +27,10 @@ type PriceFields = {
   price: string
   quantity: string
   order_time: string
+  currency: Currency
 }
 
-const EMPTY_FIELDS: PriceFields = { price: '', quantity: '1', order_time: '' }
+const EMPTY_FIELDS: PriceFields = { price: '', quantity: '1', order_time: '', currency: 'EUR' }
 
 const PRICE_TABLE_WIDTHS = {
   order_time: 120,
@@ -60,7 +61,14 @@ const entryToFields = (e: PriceListEntry): PriceFields => ({
   price: fmtNum(e.price),
   quantity: String(e.quantity),
   order_time: toDateInput(e.order_time),
+  currency: e.currency ?? 'EUR',
 })
+
+const fmtMoney = (value: string | number, currency: Currency) => {
+  const n = typeof value === 'number' ? value : parseFloat(value)
+  if (Number.isNaN(n)) return `${String(value)} ${currency}`
+  return `${n.toFixed(2)} ${currency}`
+}
 
 function PriceFieldsForm({
   values,
@@ -113,6 +121,22 @@ function PriceFieldsForm({
           />
         </div>
         <div className="flex flex-col gap-1.5">
+          <Label htmlFor={`${idPrefix}-currency`} className="text-xs text-muted-foreground">
+            Currency
+          </Label>
+          <select
+            id={`${idPrefix}-currency`}
+            value={values.currency}
+            onChange={(e) => set('currency', e.target.value as Currency)}
+            className="h-9 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          >
+            <option value="EUR">EUR</option>
+            <option value="USD">USD</option>
+          </select>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="flex flex-col gap-1.5">
           <Label htmlFor={`${idPrefix}-qty`} className="text-xs text-muted-foreground">
             Quantity
           </Label>
@@ -126,12 +150,14 @@ function PriceFieldsForm({
             className="h-9 text-sm"
           />
         </div>
-      </div>
-      <div className="rounded-md border bg-muted/40 px-3 py-2.5 flex items-center justify-between">
-        <span className="text-xs text-muted-foreground">Total</span>
-        <span className="text-sm font-mono font-medium">
-          {total != null ? fmtNum(total) : '—'}
-        </span>
+        <div className="flex flex-col gap-1.5 justify-end">
+          <div className="rounded-md border bg-muted/40 px-3 py-2.5 flex items-center justify-between h-9">
+            <span className="text-xs text-muted-foreground">Total</span>
+            <span className="text-sm font-mono font-medium">
+              {total != null ? fmtMoney(total, values.currency) : '—'}
+            </span>
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -157,7 +183,7 @@ export function PriceListPanel({ serialNumber }: Props) {
     qc.invalidateQueries({ queryKey: ['prices', serialNumber] })
 
   const addMut = useMutation({
-    mutationFn: (d: Pick<PriceListEntry, 'price' | 'quantity' | 'order_time'>) =>
+    mutationFn: (d: Pick<PriceListEntry, 'price' | 'quantity' | 'order_time' | 'currency'>) =>
       componentsApi.addPrice(serialNumber, d),
     onSuccess: () => {
       invalidate()
@@ -174,7 +200,7 @@ export function PriceListPanel({ serialNumber }: Props) {
       data,
     }: {
       id: number
-      data: Pick<PriceListEntry, 'price' | 'quantity' | 'order_time'>
+      data: Pick<PriceListEntry, 'price' | 'quantity' | 'order_time' | 'currency'>
     }) => componentsApi.updatePrice(id, data),
     onSuccess: () => {
       invalidate()
@@ -199,7 +225,12 @@ export function PriceListPanel({ serialNumber }: Props) {
     if (!f.price || !f.order_time || !Number.isFinite(qty) || qty < 1) {
       return null
     }
-    return { price: f.price, quantity: qty, order_time: f.order_time }
+    return {
+      price: f.price,
+      quantity: qty,
+      order_time: f.order_time,
+      currency: f.currency,
+    }
   }
 
   const openEdit = (entry: PriceListEntry) => {
@@ -272,13 +303,13 @@ export function PriceListPanel({ serialNumber }: Props) {
                     {fmtDate(e.order_time)}
                   </TableCell>
                   <TableCell className="font-mono font-medium">
-                    {fmtNum(e.price)}
+                    {fmtMoney(e.price, e.currency ?? 'EUR')}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {e.quantity}
                   </TableCell>
                   <TableCell className="font-mono font-medium">
-                    {fmtNum(e.total)}
+                    {fmtMoney(e.total, e.currency ?? 'EUR')}
                   </TableCell>
                   <TableCell className="p-1">
                     {selected && (
@@ -428,7 +459,7 @@ export function PriceListPanel({ serialNumber }: Props) {
         title="Delete price entry?"
         description={
           deleteTarget
-            ? `This will permanently delete the ${fmtDate(deleteTarget.order_time)} entry (${fmtNum(deleteTarget.price)} × ${deleteTarget.quantity}). This action cannot be undone.`
+            ? `This will permanently delete the ${fmtDate(deleteTarget.order_time)} entry (${fmtMoney(deleteTarget.price, deleteTarget.currency ?? 'EUR')} × ${deleteTarget.quantity}). This action cannot be undone.`
             : undefined
         }
         size="sm"

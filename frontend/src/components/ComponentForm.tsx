@@ -4,6 +4,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { SerialNumberLabel } from '@/components/SerialNumberLabel'
 import type { Component } from '@/api/types'
 
 interface Props {
@@ -20,10 +21,19 @@ const EMPTY: Partial<Component> = {
   name: '',
   description: '',
   type: '',
+  manufacturer: '',
   width_mm: null,
   height_mm: null,
+  consumed_dc_current_ma: null,
   env_temp_c: null,
   env_coated: false,
+  serial_is_generated: false,
+}
+
+function generateSerial(): string {
+  const hex = crypto.getRandomValues(new Uint8Array(4))
+    .reduce((s, b) => s + b.toString(16).padStart(2, '0'), '')
+  return `GEN-${hex}`
 }
 
 export function ComponentForm({
@@ -37,7 +47,6 @@ export function ComponentForm({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  // Persist draft on every change (skip the initial mount snapshot).
   const [hydrated, setHydrated] = useState(false)
   useEffect(() => {
     setHydrated(true)
@@ -82,15 +91,46 @@ export function ComponentForm({
       {field(
         'sn',
         'Serial Number',
-        <Input
-          id="sn"
-          value={form.serial_number ?? ''}
-          onChange={(e) => set('serial_number', e.target.value)}
-          disabled={isEdit}
-          className="h-7 text-xs"
-          required
-          placeholder="e.g. CPU-6ES7-315"
-        />,
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-2">
+            <Input
+              id="sn"
+              value={form.serial_number ?? ''}
+              onChange={(e) => {
+                set('serial_number', e.target.value)
+                set('serial_is_generated', false)
+              }}
+              disabled={isEdit}
+              className="h-7 text-xs flex-1"
+              required
+              placeholder="e.g. CPU-6ES7-315"
+            />
+            {!isEdit && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 shrink-0 text-xs"
+                onClick={() => {
+                  setForm((f) => ({
+                    ...f,
+                    serial_number: generateSerial(),
+                    serial_is_generated: true,
+                  }))
+                }}
+              >
+                Generate
+              </Button>
+            )}
+          </div>
+          {!isEdit && form.serial_is_generated && form.serial_number && (
+            <SerialNumberLabel
+              serial={form.serial_number}
+              isGenerated
+              className="text-xs"
+            />
+          )}
+        </div>,
       )}
       {field(
         'name',
@@ -102,6 +142,17 @@ export function ComponentForm({
           className="h-7 text-xs"
           required
           placeholder="Component display name"
+        />,
+      )}
+      {field(
+        'manufacturer',
+        'Manufacturer',
+        <Input
+          id="manufacturer"
+          value={form.manufacturer ?? ''}
+          onChange={(e) => set('manufacturer', e.target.value)}
+          className="h-7 text-xs"
+          placeholder="optional"
         />,
       )}
       {field(
@@ -138,6 +189,20 @@ export function ComponentForm({
           step="0.01"
           value={form.height_mm ?? ''}
           onChange={(e) => set('height_mm', e.target.value || null)}
+          className="h-7 text-xs"
+          placeholder="optional"
+        />,
+      )}
+      {field(
+        'consumed_dc',
+        'DC Current (mA)',
+        <Input
+          id="consumed_dc"
+          type="number"
+          step="0.01"
+          min="0"
+          value={form.consumed_dc_current_ma ?? ''}
+          onChange={(e) => set('consumed_dc_current_ma', e.target.value || null)}
           className="h-7 text-xs"
           placeholder="optional"
         />,
