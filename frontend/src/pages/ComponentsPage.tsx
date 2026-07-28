@@ -47,6 +47,10 @@ const COMPONENTS_TABLE_WIDTHS = {
   coated: 64,
 } as const
 
+// The trailing column only ever holds a "Yes" badge, so its spare width is the
+// first thing other columns take when they grow. Keep enough for its header.
+const COMPONENTS_TABLE_MIN_WIDTHS = { coated: 64 } as const
+
 const PANEL_TRANSITION_MS = 300
 const TYPE_FILTER_ALL = '__all__'
 const MANUFACTURER_FILTER_ALL = '__all__'
@@ -658,7 +662,7 @@ export function ComponentsPage() {
         ref={splitRef}
         className="flex flex-1 min-h-0 overflow-hidden bg-background"
       >
-        <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {isLoading && (
             <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">
               Loading…
@@ -671,9 +675,12 @@ export function ComponentsPage() {
           )}
           {!isLoading && !error && (
             <>
+            <div className="min-h-0 min-w-0 flex-1 overflow-auto">
             <Table
               storageKey="foundry.table.components"
               defaultColumnWidths={COMPONENTS_TABLE_WIDTHS}
+              minColumnWidths={COMPONENTS_TABLE_MIN_WIDTHS}
+              containerClassName="overflow-visible"
             >
               <TableHeader>
                 <TableRow className="text-xs">
@@ -794,6 +801,7 @@ export function ComponentsPage() {
                 })}
               </TableBody>
             </Table>
+            </div>
 
             {totalCount > 0 && (
               <div

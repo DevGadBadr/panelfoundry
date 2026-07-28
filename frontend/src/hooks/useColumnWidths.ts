@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 export type ColumnWidths = Record<string, number>
 
@@ -31,75 +31,129 @@ function writeStoredWidths(storageKey: string, widths: ColumnWidths) {
   }
 }
 
+/** Per-column floor: the shared minimum unless that column overrides it. */
+export function resolveMinWidths(
+  columnIds: string[],
+  minWidth: number,
+  overrides?: ColumnWidths,
+): ColumnWidths {
+  const mins: ColumnWidths = {}
+  for (const id of columnIds) {
+    const override = overrides?.[id]
+    mins[id] =
+      typeof override === 'number' && Number.isFinite(override)
+        ? Math.max(minWidth, override)
+        : minWidth
+  }
+  return mins
+}
+
+/**
+ * Raise any column under its minimum and take the pixels back from the widest
+ * ones, keeping the total untouched. Mutates the object it is handed.
+ */
+function liftToMinimum(widths: ColumnWidths, columnIds: string[], mins: ColumnWidths) {
+  let debt = 0
+  for (const id of columnIds) {
+    if (widths[id] < mins[id]) {
+      debt += mins[id] - widths[id]
+      widths[id] = mins[id]
+    }
+  }
+  if (debt <= 0) return
+
+  const donors = columnIds
+    .filter((id) => widths[id] > mins[id])
+    .sort((a, b) => widths[b] - mins[b] - (widths[a] - mins[a]))
+  for (const id of donors) {
+    if (debt <= 0) break
+    const take = Math.min(widths[id] - mins[id], debt)
+    widths[id] -= take
+    debt -= take
+  }
+}
+
+/** Take `amount` px off `ids`, split in proportion to their starting widths. */
+function shareProportionally(
+  target: ColumnWidths,
+  start: ColumnWidths,
+  ids: string[],
+  basisTotal: number,
+  amount: number,
+) {
+  // Measured against a running total so rounding can't leak or duplicate pixels.
+  let walked = 0
+  let given = 0
+  for (const id of ids) {
+    walked += start[id]
+    const mark = Math.round((walked / basisTotal) * amount)
+    target[id] = start[id] - (mark - given)
+    given = mark
+  }
+}
+
+function sameWidths(a: ColumnWidths, b: ColumnWidths) {
+  const aKeys = Object.keys(a)
+  if (aKeys.length !== Object.keys(b).length) return false
+  return aKeys.every((key) => a[key] === b[key])
+}
+
 /** Merge saved widths with defaults; drop unknown columns, fill missing ones. */
 export function resolveColumnWidths(
   defaults: ColumnWidths,
   saved: ColumnWidths | null,
-  minWidth = DEFAULT_MIN_WIDTH,
+  mins: ColumnWidths,
 ): ColumnWidths {
   const next: ColumnWidths = {}
   for (const id of Object.keys(defaults)) {
     const savedWidth = saved?.[id]
     next[id] =
       typeof savedWidth === 'number' && Number.isFinite(savedWidth)
-        ? Math.max(minWidth, savedWidth)
-        : defaults[id]
+        ? Math.max(mins[id], savedWidth)
+        : Math.max(mins[id], defaults[id])
   }
   return next
 }
 
-/** Scale column widths so they exactly fill `targetWidth` (keeps relative proportions). */
-export function scaleWidthsToFit(
+/**
+ * Scale widths proportionally so they add up to exactly `containerWidth`, in
+ * either direction. Stored widths are only ever relative: this is what turns
+ * them into pixels, so the table always spans its container and never scrolls
+ * sideways. The one exception is a container too narrow to hold every column at
+ * its minimum, where the columns stop shrinking and the table overflows.
+ */
+export function fitWidthsToContainer(
   widths: ColumnWidths,
   columnIds: string[],
-  targetWidth: number,
-  minWidth = DEFAULT_MIN_WIDTH,
+  containerWidth: number,
+  mins: ColumnWidths,
 ): ColumnWidths {
-  if (targetWidth <= 0 || columnIds.length === 0) return { ...widths }
-
-  const minTotal = minWidth * columnIds.length
-  const fitTarget = Math.max(targetWidth, minTotal)
-
-  const currentTotal = columnIds.reduce((sum, id) => sum + (widths[id] ?? minWidth), 0)
-  if (currentTotal <= 0) {
-    const even = Math.floor(fitTarget / columnIds.length)
-    const next: ColumnWidths = {}
-    let used = 0
-    columnIds.forEach((id, i) => {
-      const w = i === columnIds.length - 1 ? fitTarget - used : even
-      next[id] = Math.max(minWidth, w)
-      used += next[id]
-    })
-    return next
+  const base: ColumnWidths = {}
+  let current = 0
+  let minTotal = 0
+  for (const id of columnIds) {
+    base[id] = Math.max(mins[id], Math.round(widths[id] ?? mins[id]))
+    current += base[id]
+    minTotal += mins[id]
   }
 
-  // First pass: proportional scale
+  const target = Math.max(containerWidth, minTotal)
+  if (columnIds.length === 0 || containerWidth <= 0 || current === target) return base
+
+  // Scale against a running total so rounding can't drift and the last column
+  // lands exactly on the target.
   const scaled: ColumnWidths = {}
-  let used = 0
-  columnIds.forEach((id, i) => {
-    if (i === columnIds.length - 1) {
-      scaled[id] = Math.max(minWidth, fitTarget - used)
-    } else {
-      const w = Math.max(
-        minWidth,
-        Math.round(((widths[id] ?? minWidth) / currentTotal) * fitTarget),
-      )
-      scaled[id] = w
-      used += w
-    }
-  })
-
-  // If early columns ate too much, clamp from the right neighbor chain.
-  let overflow = columnIds.reduce((s, id) => s + scaled[id], 0) - fitTarget
-  if (overflow > 0) {
-    for (let i = columnIds.length - 1; i >= 0 && overflow > 0; i--) {
-      const id = columnIds[i]
-      const reducible = scaled[id] - minWidth
-      const cut = Math.min(reducible, overflow)
-      scaled[id] -= cut
-      overflow -= cut
-    }
+  let walked = 0
+  let given = 0
+  for (const id of columnIds) {
+    walked += base[id]
+    const mark = Math.round((walked / current) * target)
+    scaled[id] = mark - given
+    given = mark
   }
+
+  // Scaling down can push narrow columns under their minimum.
+  liftToMinimum(scaled, columnIds, mins)
 
   return scaled
 }
@@ -109,78 +163,97 @@ export type UseColumnWidthsOptions = {
   /** Relative default widths keyed by column id (key order = column order). */
   defaultWidths: ColumnWidths
   minWidth?: number
+  /** Per-column minimum widths, for columns that need more room than the rest. */
+  minWidths?: ColumnWidths
   /** Measured table container width in px. When 0, widths stay as resolved defaults. */
   containerWidth: number
 }
 
 /**
- * Fixed-width table columns: total width always matches the container.
- * Resizing a column steals/gives space only from the next column to its right.
+ * Resizable table columns at a fixed total width: the table always spans its
+ * container exactly and never scrolls sideways.
+ *
+ * Widening a column spends the last column's spare width first, so the columns
+ * in between simply slide right at their current size. Only once the last
+ * column is down to its minimum do the rest start giving up width in
+ * proportion. Narrowing a column hands the space back to everything on its
+ * right proportionally.
+ *
+ * Stored widths are relative: the container size is applied at render time, so
+ * narrowing the table (a side panel opening, say) scales the columns down and
+ * widening restores them untouched.
  */
 export function useColumnWidths({
   storageKey,
   defaultWidths,
   minWidth = DEFAULT_MIN_WIDTH,
+  minWidths,
   containerWidth,
 }: UseColumnWidthsOptions) {
-  const columnIds = Object.keys(defaultWidths)
   const defaultsRef = useRef(defaultWidths)
   defaultsRef.current = defaultWidths
 
-  const minWidthRef = useRef(minWidth)
-  minWidthRef.current = minWidth
+  // Keep one array identity per column set so memos below actually hold.
+  const nextColumnIds = Object.keys(defaultWidths)
+  const defaultIds = nextColumnIds.join('\0')
+  const columnIdsRef = useRef(nextColumnIds)
+  if (columnIdsRef.current.join('\0') !== defaultIds) {
+    columnIdsRef.current = nextColumnIds
+  }
+  const columnIds = columnIdsRef.current
 
-  const hadStoredRef = useRef(readStoredWidths(storageKey) != null)
-  const fittedOnceRef = useRef(false)
-  const draggingRef = useRef(false)
+  // Same trick for the floors, so they only change identity when a value does.
+  const nextMins = resolveMinWidths(columnIds, minWidth, minWidths)
+  const minsRef = useRef(nextMins)
+  if (!sameWidths(minsRef.current, nextMins)) {
+    minsRef.current = nextMins
+  }
+  const mins = minsRef.current
+
+  const containerWidthRef = useRef(containerWidth)
+  containerWidthRef.current = containerWidth
 
   const [widths, setWidths] = useState<ColumnWidths>(() =>
-    resolveColumnWidths(defaultWidths, readStoredWidths(storageKey), minWidth),
+    resolveColumnWidths(defaultWidths, readStoredWidths(storageKey), mins),
   )
 
   const widthsRef = useRef(widths)
   widthsRef.current = widths
 
-  // Fit to container: first time we know the width, and whenever the container resizes.
+  // Column set changed — add defaults for new columns, drop removed ones.
   useEffect(() => {
-    if (containerWidth <= 0 || draggingRef.current) return
-
     setWidths((prev) => {
-      const base =
-        !fittedOnceRef.current && !hadStoredRef.current
-          ? resolveColumnWidths(defaultsRef.current, null, minWidthRef.current)
-          : resolveColumnWidths(defaultsRef.current, prev, minWidthRef.current)
-
-      fittedOnceRef.current = true
-      return scaleWidthsToFit(
-        base,
-        Object.keys(defaultsRef.current),
-        containerWidth,
-        minWidthRef.current,
-      )
+      const next = resolveColumnWidths(defaultsRef.current, prev, minsRef.current)
+      return sameWidths(prev, next) ? prev : next
     })
-  }, [containerWidth])
+  }, [defaultIds])
 
-  // Column set changed — re-resolve then fit.
-  const defaultIds = columnIds.join('\0')
-  useEffect(() => {
-    if (containerWidth <= 0) return
-    setWidths((prev) =>
-      scaleWidthsToFit(
-        resolveColumnWidths(defaultsRef.current, prev, minWidthRef.current),
-        Object.keys(defaultsRef.current),
-        containerWidth,
-        minWidthRef.current,
-      ),
-    )
-  }, [defaultIds, containerWidth])
+  const renderedWidths = useMemo(
+    () => fitWidthsToContainer(widths, columnIds, containerWidth, mins),
+    [widths, columnIds, containerWidth, mins],
+  )
+
+  const totalWidth = useMemo(
+    () => Object.values(renderedWidths).reduce((sum, w) => sum + w, 0),
+    [renderedWidths],
+  )
 
   const dragRef = useRef<{
     columnId: string
-    nextId: string
     startX: number
     startWidth: number
-    startNextWidth: number
+    /** Widths of every column when the drag began; moves are measured off these. */
+    startWidths: ColumnWidths
+    /** Columns right of the handle — they absorb whatever the drag hands out. */
+    rightIds: string[]
+    rightTotal: number
+    /** How much the right side can give up in total before everything is at its floor. */
+    rightSlack: number
+    /** The last column, which is spent first, and the ones before it. */
+    lastId: string
+    lastSlack: number
+    middleIds: string[]
+    middleTotal: number
   } | null>(null)
 
   const listenersRef = useRef<{
@@ -198,7 +271,6 @@ export function useColumnWidths({
   const finishResize = useCallback(() => {
     if (!dragRef.current) return
     dragRef.current = null
-    draggingRef.current = false
     document.body.style.cursor = ''
     document.body.style.userSelect = ''
     clearDragListeners()
@@ -210,7 +282,6 @@ export function useColumnWidths({
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
       dragRef.current = null
-      draggingRef.current = false
       clearDragListeners()
     }
   }, [clearDragListeners])
@@ -219,23 +290,42 @@ export function useColumnWidths({
     (columnId: string, clientX: number) => {
       const ids = Object.keys(defaultsRef.current)
       const index = ids.indexOf(columnId)
-      // Last column has no right neighbor to trade width with.
+      // The last column's right edge is the table's right edge: nothing to give.
       if (index < 0 || index >= ids.length - 1) return
 
-      const nextId = ids[index + 1]
       clearDragListeners()
 
-      const startWidth = widthsRef.current[columnId] ?? minWidthRef.current
-      const startNextWidth = widthsRef.current[nextId] ?? minWidthRef.current
+      const columnMins = minsRef.current
+      // Measure against the pixels currently on screen, not the relative widths.
+      const baked = fitWidthsToContainer(
+        widthsRef.current,
+        ids,
+        containerWidthRef.current,
+        columnMins,
+      )
+      widthsRef.current = baked
+      setWidths(baked)
+
+      const rightIds = ids.slice(index + 1)
+      const rightTotal = rightIds.reduce((sum, id) => sum + baked[id], 0)
+      const rightSlack = rightIds.reduce((sum, id) => sum + baked[id] - columnMins[id], 0)
+      const lastId = ids[ids.length - 1]
+      const middleIds = rightIds.slice(0, -1)
+      const startWidth = baked[columnId]
 
       dragRef.current = {
         columnId,
-        nextId,
         startX: clientX,
         startWidth,
-        startNextWidth,
+        startWidths: baked,
+        rightIds,
+        rightTotal,
+        rightSlack,
+        lastId,
+        lastSlack: baked[lastId] - columnMins[lastId],
+        middleIds,
+        middleTotal: middleIds.reduce((sum, id) => sum + baked[id], 0),
       }
-      draggingRef.current = true
       document.body.style.cursor = 'col-resize'
       document.body.style.userSelect = 'none'
 
@@ -243,30 +333,40 @@ export function useColumnWidths({
         const drag = dragRef.current
         if (!drag) return
 
-        const min = minWidthRef.current
-        const rawDelta = event.clientX - drag.startX
-        // Grow current → shrink next; shrink current → grow next.
-        // Clamp so neither column goes below minWidth (fixed total width).
-        const maxGrow = drag.startNextWidth - min
-        const maxShrink = drag.startWidth - min
-        const delta = Math.max(-maxShrink, Math.min(maxGrow, rawDelta))
+        // Can't shrink past the minimum, or take more than the right side has.
+        const delta = Math.max(
+          columnMins[drag.columnId] - drag.startWidth,
+          Math.min(drag.rightSlack, Math.round(event.clientX - drag.startX)),
+        )
 
-        const nextWidth = drag.startWidth + delta
-        const nextNeighbor = drag.startNextWidth - delta
+        const next: ColumnWidths = { ...drag.startWidths }
+        next[drag.columnId] = drag.startWidth + delta
 
-        setWidths((prev) => {
-          if (
-            prev[drag.columnId] === nextWidth &&
-            prev[drag.nextId] === nextNeighbor
-          ) {
-            return prev
+        if (delta > 0) {
+          // Spend the last column's spare width first — the columns in between
+          // keep their size and just slide right. Only what the last column
+          // can't cover comes out of them, split by width.
+          const fromLast = Math.min(delta, drag.lastSlack)
+          next[drag.lastId] = drag.startWidths[drag.lastId] - fromLast
+
+          const rest = delta - fromLast
+          if (rest > 0 && drag.middleTotal > 0) {
+            shareProportionally(
+              next,
+              drag.startWidths,
+              drag.middleIds,
+              drag.middleTotal,
+              rest,
+            )
+            liftToMinimum(next, drag.middleIds, columnMins)
           }
-          return {
-            ...prev,
-            [drag.columnId]: nextWidth,
-            [drag.nextId]: nextNeighbor,
-          }
-        })
+        } else if (delta < 0 && drag.rightTotal > 0) {
+          // Space handed back goes to everything on the right, last column
+          // included, in proportion to how wide each one already is.
+          shareProportionally(next, drag.startWidths, drag.rightIds, drag.rightTotal, delta)
+        }
+
+        setWidths((prev) => (sameWidths(prev, next) ? prev : next))
       }
 
       const onUp = () => {
@@ -289,10 +389,11 @@ export function useColumnWidths({
   )
 
   return {
-    widths,
+    widths: renderedWidths,
+    totalWidth,
     columnIds,
     startResize,
-    minWidth,
+    minWidths: mins,
     canResizeColumn,
   }
 }

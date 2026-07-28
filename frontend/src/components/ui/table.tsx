@@ -41,13 +41,26 @@ type TableProps = React.ComponentProps<"table"> & {
   defaultColumnWidths?: ColumnWidths
   /** Minimum column width in px while resizing. */
   minColumnWidth?: number
+  /**
+   * Per-column minimum widths, for columns that need more room than the rest —
+   * a last column that should always show its header, for instance.
+   */
+  minColumnWidths?: ColumnWidths
+  /**
+   * Classes for the scroll container wrapping the table. Resizable tables
+   * scroll horizontally on their own by default; pass `overflow-visible` to let
+   * an ancestor scroll area own both axes instead.
+   */
+  containerClassName?: string
 }
 
 function Table({
   storageKey,
   defaultColumnWidths,
   minColumnWidth,
+  minColumnWidths,
   className,
+  containerClassName,
   ...props
 }: TableProps) {
   if (storageKey && defaultColumnWidths) {
@@ -56,16 +69,25 @@ function Table({
         storageKey={storageKey}
         defaultColumnWidths={defaultColumnWidths}
         minColumnWidth={minColumnWidth}
+        minColumnWidths={minColumnWidths}
         className={className}
+        containerClassName={containerClassName}
         {...props}
       />
     )
   }
-  return <TableRoot className={cn("w-full", className)} {...props} />
+  return (
+    <TableRoot
+      className={cn("w-full", className)}
+      containerClassName={containerClassName}
+      {...props}
+    />
+  )
 }
 
 function TableRoot({
   className,
+  containerClassName,
   children,
   colgroup,
   containerRef,
@@ -73,12 +95,13 @@ function TableRoot({
 }: React.ComponentProps<"table"> & {
   colgroup?: React.ReactNode
   containerRef?: React.Ref<HTMLDivElement>
+  containerClassName?: string
 }) {
   return (
     <div
       ref={containerRef}
       data-slot="table-container"
-      className="relative w-full overflow-hidden"
+      className={cn("relative w-full", containerClassName ?? "overflow-hidden")}
     >
       <table
         data-slot="table"
@@ -96,7 +119,9 @@ function ResizableTable({
   storageKey,
   defaultColumnWidths,
   minColumnWidth,
+  minColumnWidths,
   className,
+  containerClassName,
   children,
   style,
   ...props
@@ -121,10 +146,11 @@ function ResizableTable({
     return () => observer.disconnect()
   }, [])
 
-  const { widths, columnIds, startResize, canResizeColumn } = useColumnWidths({
+  const { widths, totalWidth, columnIds, startResize, canResizeColumn } = useColumnWidths({
     storageKey,
     defaultWidths: defaultColumnWidths,
     minWidth: minColumnWidth,
+    minWidths: minColumnWidths,
     containerWidth,
   })
   const [activeColumnId, setActiveColumnId] = React.useState<string | null>(null)
@@ -145,8 +171,9 @@ function ResizableTable({
     <ColumnResizeContext.Provider value={ctx}>
       <TableRoot
         containerRef={containerRef}
-        className={cn("w-full table-fixed", className)}
-        style={style}
+        className={cn("table-fixed", className)}
+        containerClassName={containerClassName ?? "overflow-x-auto overflow-y-hidden"}
+        style={{ ...style, width: totalWidth > 0 ? totalWidth : undefined }}
         colgroup={
           <colgroup>
             {columnIds.map((id) => (
@@ -241,7 +268,7 @@ function TableHead({
       data-slot="table-head"
       data-column-id={columnId}
       className={cn(
-        "relative h-10 px-2 text-left align-middle font-medium whitespace-nowrap text-foreground [&:has([role=checkbox])]:pr-0",
+        "relative h-10 overflow-hidden px-2 text-left align-middle font-medium text-ellipsis whitespace-nowrap text-foreground [&:has([role=checkbox])]:pr-0",
         className
       )}
       {...props}
