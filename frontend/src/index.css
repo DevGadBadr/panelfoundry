@@ -134,7 +134,9 @@
 }
 
 html {
-  font-size: 110%;
+  /* Scale rem-based UI with viewport; layout width stays capped separately.
+     ~100% on narrow, ~112% around 1280px, up to ~125% on wide laptops. */
+  font-size: clamp(100%, 0.35vw + 0.85rem, 125%);
   height: 100%;
   overflow: hidden;
 }

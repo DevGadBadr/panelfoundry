@@ -1,161 +1,38 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { readJson, writeJson } from '@/lib/safeStorage'
+import {
+  DEFAULT_MIN_WIDTH,
+  fitWidthsToContainer,
+  liftToMinimum,
+  resolveColumnWidths,
+  resolveMinWidths,
+  sameWidths,
+  shareProportionally,
+  type ColumnWidths,
+} from '@/hooks/columnWidthMath'
 
-export type ColumnWidths = Record<string, number>
-
-const DEFAULT_MIN_WIDTH = 48
+export type { ColumnWidths } from '@/hooks/columnWidthMath'
+export {
+  resolveMinWidths,
+  resolveColumnWidths,
+  fitWidthsToContainer,
+} from '@/hooks/columnWidthMath'
 
 function readStoredWidths(storageKey: string): ColumnWidths | null {
-  try {
-    const raw = localStorage.getItem(storageKey)
-    if (!raw) return null
-    const parsed: unknown = JSON.parse(raw)
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+  const parsed = readJson<Record<string, unknown>>(storageKey)
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
 
-    const widths: ColumnWidths = {}
-    for (const [key, value] of Object.entries(parsed)) {
-      if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
-        widths[key] = value
-      }
+  const widths: ColumnWidths = {}
+  for (const [key, value] of Object.entries(parsed)) {
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+      widths[key] = value
     }
-    return Object.keys(widths).length > 0 ? widths : null
-  } catch {
-    return null
   }
+  return Object.keys(widths).length > 0 ? widths : null
 }
 
 function writeStoredWidths(storageKey: string, widths: ColumnWidths) {
-  try {
-    localStorage.setItem(storageKey, JSON.stringify(widths))
-  } catch {
-    // localStorage may be unavailable — ignore
-  }
-}
-
-/** Per-column floor: the shared minimum unless that column overrides it. */
-export function resolveMinWidths(
-  columnIds: string[],
-  minWidth: number,
-  overrides?: ColumnWidths,
-): ColumnWidths {
-  const mins: ColumnWidths = {}
-  for (const id of columnIds) {
-    const override = overrides?.[id]
-    mins[id] =
-      typeof override === 'number' && Number.isFinite(override)
-        ? Math.max(minWidth, override)
-        : minWidth
-  }
-  return mins
-}
-
-/**
- * Raise any column under its minimum and take the pixels back from the widest
- * ones, keeping the total untouched. Mutates the object it is handed.
- */
-function liftToMinimum(widths: ColumnWidths, columnIds: string[], mins: ColumnWidths) {
-  let debt = 0
-  for (const id of columnIds) {
-    if (widths[id] < mins[id]) {
-      debt += mins[id] - widths[id]
-      widths[id] = mins[id]
-    }
-  }
-  if (debt <= 0) return
-
-  const donors = columnIds
-    .filter((id) => widths[id] > mins[id])
-    .sort((a, b) => widths[b] - mins[b] - (widths[a] - mins[a]))
-  for (const id of donors) {
-    if (debt <= 0) break
-    const take = Math.min(widths[id] - mins[id], debt)
-    widths[id] -= take
-    debt -= take
-  }
-}
-
-/** Take `amount` px off `ids`, split in proportion to their starting widths. */
-function shareProportionally(
-  target: ColumnWidths,
-  start: ColumnWidths,
-  ids: string[],
-  basisTotal: number,
-  amount: number,
-) {
-  // Measured against a running total so rounding can't leak or duplicate pixels.
-  let walked = 0
-  let given = 0
-  for (const id of ids) {
-    walked += start[id]
-    const mark = Math.round((walked / basisTotal) * amount)
-    target[id] = start[id] - (mark - given)
-    given = mark
-  }
-}
-
-function sameWidths(a: ColumnWidths, b: ColumnWidths) {
-  const aKeys = Object.keys(a)
-  if (aKeys.length !== Object.keys(b).length) return false
-  return aKeys.every((key) => a[key] === b[key])
-}
-
-/** Merge saved widths with defaults; drop unknown columns, fill missing ones. */
-export function resolveColumnWidths(
-  defaults: ColumnWidths,
-  saved: ColumnWidths | null,
-  mins: ColumnWidths,
-): ColumnWidths {
-  const next: ColumnWidths = {}
-  for (const id of Object.keys(defaults)) {
-    const savedWidth = saved?.[id]
-    next[id] =
-      typeof savedWidth === 'number' && Number.isFinite(savedWidth)
-        ? Math.max(mins[id], savedWidth)
-        : Math.max(mins[id], defaults[id])
-  }
-  return next
-}
-
-/**
- * Scale widths proportionally so they add up to exactly `containerWidth`, in
- * either direction. Stored widths are only ever relative: this is what turns
- * them into pixels, so the table always spans its container and never scrolls
- * sideways. The one exception is a container too narrow to hold every column at
- * its minimum, where the columns stop shrinking and the table overflows.
- */
-export function fitWidthsToContainer(
-  widths: ColumnWidths,
-  columnIds: string[],
-  containerWidth: number,
-  mins: ColumnWidths,
-): ColumnWidths {
-  const base: ColumnWidths = {}
-  let current = 0
-  let minTotal = 0
-  for (const id of columnIds) {
-    base[id] = Math.max(mins[id], Math.round(widths[id] ?? mins[id]))
-    current += base[id]
-    minTotal += mins[id]
-  }
-
-  const target = Math.max(containerWidth, minTotal)
-  if (columnIds.length === 0 || containerWidth <= 0 || current === target) return base
-
-  // Scale against a running total so rounding can't drift and the last column
-  // lands exactly on the target.
-  const scaled: ColumnWidths = {}
-  let walked = 0
-  let given = 0
-  for (const id of columnIds) {
-    walked += base[id]
-    const mark = Math.round((walked / current) * target)
-    scaled[id] = mark - given
-    given = mark
-  }
-
-  // Scaling down can push narrow columns under their minimum.
-  liftToMinimum(scaled, columnIds, mins)
-
-  return scaled
+  writeJson(storageKey, widths)
 }
 
 export type UseColumnWidthsOptions = {
@@ -181,7 +58,8 @@ export type UseColumnWidthsOptions = {
  *
  * Stored widths are relative: the container size is applied at render time, so
  * narrowing the table (a side panel opening, say) scales the columns down and
- * widening restores them untouched.
+ * widening restores them untouched. When the container is narrower than the
+ * sum of column floors, columns stay at their mins and the UI clips.
  */
 export function useColumnWidths({
   storageKey,

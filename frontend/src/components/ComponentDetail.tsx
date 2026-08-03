@@ -3,6 +3,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { SerialNumberLabel } from '@/components/SerialNumberLabel'
+import { LabeledRow } from '@/components/LabeledRow'
 import { PriceListPanel } from './PriceListPanel'
 import type { Component } from '@/api/types'
 import { formatMm, normalizeManufacturer } from '@/lib/utils'
@@ -10,15 +11,6 @@ import { formatMm, normalizeManufacturer } from '@/lib/utils'
 interface Props {
   component: Component
   onDelete: () => void
-}
-
-function Row({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="grid grid-cols-[140px_1fr] text-xs gap-x-2 py-1">
-      <span className="text-muted-foreground text-right">{label}</span>
-      <span className="font-medium">{value ?? '—'}</span>
-    </div>
-  )
 }
 
 export function ComponentDetail({ component: c, onDelete }: Props) {
@@ -32,42 +24,38 @@ export function ComponentDetail({ component: c, onDelete }: Props) {
         <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
           Specifications
         </p>
-        <Row
-          label="Serial Number"
-          value={
-            <SerialNumberLabel
-              serial={c.serial_number}
-              isGenerated={c.serial_is_generated}
-            />
-          }
-        />
-        <Row label="Name" value={c.name} />
-        <Row
-          label="Manufacturer"
-          value={normalizeManufacturer(c.manufacturer) || null}
-        />
-        <Row label="Type" value={<Badge variant="secondary" className="text-[10px]">{c.type}</Badge>} />
-        <Row label="Part Number" value={c.part_number || null} />
-        <Row label="Width" value={width != null ? `${width} mm` : null} />
-        <Row label="Height" value={height != null ? `${height} mm` : null} />
-        <Row label="Depth" value={depth != null ? `${depth} mm` : null} />
-        <Row
-          label="Consumed DC Current"
-          value={c.consumed_dc_current_ma != null ? `${c.consumed_dc_current_ma} mA` : null}
-        />
-        <Row label="Max Temp" value={c.env_temp_c != null ? `${c.env_temp_c} °C` : null} />
-        <Row
-          label="Conformal Coat"
-          value={
-            c.env_coated ? (
-              <Badge variant="success" className="text-[10px] py-0 px-1.5">
-                Yes
-              </Badge>
-            ) : (
-              'No'
-            )
-          }
-        />
+        <LabeledRow label="Serial Number">
+          <SerialNumberLabel
+            serial={c.serial_number}
+            isGenerated={c.serial_is_generated}
+          />
+        </LabeledRow>
+        <LabeledRow label="Name">{c.name}</LabeledRow>
+        <LabeledRow label="Manufacturer">
+          {normalizeManufacturer(c.manufacturer) || null}
+        </LabeledRow>
+        <LabeledRow label="Type">
+          <Badge variant="secondary" className="text-[10px]">{c.type}</Badge>
+        </LabeledRow>
+        <LabeledRow label="Part Number">{c.part_number || null}</LabeledRow>
+        <LabeledRow label="Width">{width != null ? `${width} mm` : null}</LabeledRow>
+        <LabeledRow label="Height">{height != null ? `${height} mm` : null}</LabeledRow>
+        <LabeledRow label="Depth">{depth != null ? `${depth} mm` : null}</LabeledRow>
+        <LabeledRow label="Consumed DC Current">
+          {c.consumed_dc_current_ma != null ? `${c.consumed_dc_current_ma} mA` : null}
+        </LabeledRow>
+        <LabeledRow label="Max Temp">
+          {c.env_temp_c != null ? `${c.env_temp_c} °C` : null}
+        </LabeledRow>
+        <LabeledRow label="Conformal Coat">
+          {c.env_coated ? (
+            <Badge variant="success" className="text-[10px] py-0 px-1.5">
+              Yes
+            </Badge>
+          ) : (
+            'No'
+          )}
+        </LabeledRow>
         {c.description && (
           <div className="mt-2">
             <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">

@@ -15,6 +15,7 @@ import {
 import { Separator } from '@/components/ui/separator'
 import { PopupModal } from '@/components/ui/popup-modal'
 import { DialogFooter } from '@/components/ui/dialog'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { componentsApi } from '@/api/components'
 import type { Currency, PriceListEntry } from '@/api/types'
 import { cn } from '@/lib/utils'
@@ -29,6 +30,10 @@ type PriceFields = {
   order_time: string
   currency: Currency
 }
+
+type FormMode =
+  | { kind: 'create' }
+  | { kind: 'edit'; entry: PriceListEntry }
 
 const EMPTY_FIELDS: PriceFields = { price: '', quantity: '1', order_time: '', currency: 'EUR' }
 
@@ -166,12 +171,9 @@ function PriceFieldsForm({
 export function PriceListPanel({ serialNumber }: Props) {
   const qc = useQueryClient()
   const [selectedId, setSelectedId] = useState<number | null>(null)
-  const [createOpen, setCreateOpen] = useState(false)
-  const [createForm, setCreateForm] = useState<PriceFields>(EMPTY_FIELDS)
-  const [createError, setCreateError] = useState('')
-  const [editTarget, setEditTarget] = useState<PriceListEntry | null>(null)
-  const [editForm, setEditForm] = useState<PriceFields>(EMPTY_FIELDS)
-  const [editError, setEditError] = useState('')
+  const [formMode, setFormMode] = useState<FormMode | null>(null)
+  const [formFields, setFormFields] = useState<PriceFields>(EMPTY_FIELDS)
+  const [formError, setFormError] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<PriceListEntry | null>(null)
 
   const { data: entries = [], isLoading } = useQuery({
@@ -187,11 +189,11 @@ export function PriceListPanel({ serialNumber }: Props) {
       componentsApi.addPrice(serialNumber, d),
     onSuccess: () => {
       invalidate()
-      setCreateOpen(false)
-      setCreateForm(EMPTY_FIELDS)
-      setCreateError('')
+      setFormMode(null)
+      setFormFields(EMPTY_FIELDS)
+      setFormError('')
     },
-    onError: (e) => setCreateError(e instanceof Error ? e.message : 'Error'),
+    onError: (e) => setFormError(e instanceof Error ? e.message : 'Error'),
   })
 
   const updateMut = useMutation({
@@ -204,11 +206,11 @@ export function PriceListPanel({ serialNumber }: Props) {
     }) => componentsApi.updatePrice(id, data),
     onSuccess: () => {
       invalidate()
-      setEditTarget(null)
-      setEditError('')
+      setFormMode(null)
+      setFormError('')
       setSelectedId(null)
     },
-    onError: (e) => setEditError(e instanceof Error ? e.message : 'Error'),
+    onError: (e) => setFormError(e instanceof Error ? e.message : 'Error'),
   })
 
   const deleteMut = useMutation({
@@ -219,6 +221,9 @@ export function PriceListPanel({ serialNumber }: Props) {
       setSelectedId(null)
     },
   })
+
+  const formPending = addMut.isPending || updateMut.isPending
+  const isEdit = formMode?.kind === 'edit'
 
   const parseFields = (f: PriceFields) => {
     const qty = parseInt(f.quantity, 10)
@@ -233,10 +238,23 @@ export function PriceListPanel({ serialNumber }: Props) {
     }
   }
 
+  const openCreate = () => {
+    setSelectedId(null)
+    setFormFields(EMPTY_FIELDS)
+    setFormError('')
+    setFormMode({ kind: 'create' })
+  }
+
   const openEdit = (entry: PriceListEntry) => {
-    setEditTarget(entry)
-    setEditForm(entryToFields(entry))
-    setEditError('')
+    setFormFields(entryToFields(entry))
+    setFormError('')
+    setFormMode({ kind: 'edit', entry })
+  }
+
+  const closeForm = () => {
+    if (formPending) return
+    setFormMode(null)
+    setFormError('')
   }
 
   return (
@@ -249,12 +267,7 @@ export function PriceListPanel({ serialNumber }: Props) {
           size="sm"
           variant="outline"
           className="h-6 text-xs gap-1"
-          onClick={() => {
-            setSelectedId(null)
-            setCreateForm(EMPTY_FIELDS)
-            setCreateError('')
-            setCreateOpen(true)
-          }}
+          onClick={openCreate}
         >
           <Plus className="h-3 w-3" />
           Add Entry
@@ -275,6 +288,7 @@ export function PriceListPanel({ serialNumber }: Props) {
         <Table
           storageKey="foundry.table.price-history"
           defaultColumnWidths={PRICE_TABLE_WIDTHS}
+          containerClassName="overflow-x-hidden"
         >
           <TableHeader>
             <TableRow className="text-[11px]">
@@ -349,109 +363,68 @@ export function PriceListPanel({ serialNumber }: Props) {
         </Table>
       )}
 
-      {/* Add entry */}
       <PopupModal
-        open={createOpen}
+        open={formMode !== null}
         onOpenChange={(open) => {
-          if (!open && !addMut.isPending) {
-            setCreateOpen(false)
-            setCreateError('')
-          }
+          if (!open) closeForm()
         }}
-        title="Add price entry"
-        description="Record a purchase price and quantity for this component."
+        title={isEdit ? 'Edit price entry' : 'Add price entry'}
+        description={
+          isEdit
+            ? 'Update the order date, unit price, or quantity.'
+            : 'Record a purchase price and quantity for this component.'
+        }
         size="sm"
       >
         <form
           className="flex flex-col gap-4"
           onSubmit={(e) => {
             e.preventDefault()
-            const data = parseFields(createForm)
+            const data = parseFields(formFields)
             if (!data) {
-              setCreateError('Please fill in a valid date, price, and quantity.')
+              setFormError('Please fill in a valid date, price, and quantity.')
               return
             }
-            setCreateError('')
-            addMut.mutate(data)
+            setFormError('')
+            if (formMode?.kind === 'edit') {
+              updateMut.mutate({ id: formMode.entry.id, data })
+            } else {
+              addMut.mutate(data)
+            }
           }}
         >
           <PriceFieldsForm
-            idPrefix="price-create"
-            values={createForm}
-            onChange={setCreateForm}
+            idPrefix={isEdit ? 'price-edit' : 'price-create'}
+            values={formFields}
+            onChange={setFormFields}
           />
-          {createError && (
-            <p className="text-xs text-destructive">{createError}</p>
+          {formError && (
+            <p className="text-xs text-destructive">{formError}</p>
           )}
           <DialogFooter className="mt-1">
             <Button
               type="button"
               variant="outline"
               size="sm"
-              disabled={addMut.isPending}
-              onClick={() => setCreateOpen(false)}
+              disabled={formPending}
+              onClick={closeForm}
             >
               Cancel
             </Button>
-            <Button type="submit" size="sm" disabled={addMut.isPending}>
-              {addMut.isPending ? 'Adding…' : 'Add Entry'}
+            <Button type="submit" size="sm" disabled={formPending}>
+              {formPending
+                ? isEdit
+                  ? 'Saving…'
+                  : 'Adding…'
+                : isEdit
+                  ? 'Save Changes'
+                  : 'Add Entry'}
             </Button>
           </DialogFooter>
         </form>
       </PopupModal>
 
-      {/* Edit entry */}
-      <PopupModal
-        open={editTarget !== null}
-        onOpenChange={(open) => {
-          if (!open && !updateMut.isPending) {
-            setEditTarget(null)
-            setEditError('')
-          }
-        }}
-        title="Edit price entry"
-        description="Update the order date, unit price, or quantity."
-        size="sm"
-      >
-        <form
-          className="flex flex-col gap-4"
-          onSubmit={(e) => {
-            e.preventDefault()
-            if (!editTarget) return
-            const data = parseFields(editForm)
-            if (!data) {
-              setEditError('Please fill in a valid date, price, and quantity.')
-              return
-            }
-            setEditError('')
-            updateMut.mutate({ id: editTarget.id, data })
-          }}
-        >
-          <PriceFieldsForm
-            idPrefix="price-edit"
-            values={editForm}
-            onChange={setEditForm}
-          />
-          {editError && <p className="text-xs text-destructive">{editError}</p>}
-          <DialogFooter className="mt-1">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={updateMut.isPending}
-              onClick={() => setEditTarget(null)}
-            >
-              Cancel
-            </Button>
-            <Button type="submit" size="sm" disabled={updateMut.isPending}>
-              {updateMut.isPending ? 'Saving…' : 'Save Changes'}
-            </Button>
-          </DialogFooter>
-        </form>
-      </PopupModal>
-
-      {/* Delete confirm */}
-      <PopupModal
+      <ConfirmDialog
         open={deleteTarget !== null}
         onOpenChange={(open) => {
           if (!open && !deleteMut.isPending) setDeleteTarget(null)
@@ -462,29 +435,12 @@ export function PriceListPanel({ serialNumber }: Props) {
             ? `This will permanently delete the ${fmtDate(deleteTarget.order_time)} entry (${fmtMoney(deleteTarget.price, deleteTarget.currency ?? 'EUR')} × ${deleteTarget.quantity}). This action cannot be undone.`
             : undefined
         }
-        size="sm"
-      >
-        <DialogFooter className="mt-2">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={deleteMut.isPending}
-            onClick={() => setDeleteTarget(null)}
-          >
-            Cancel
-          </Button>
-          <Button
-            variant="destructive"
-            size="sm"
-            disabled={deleteMut.isPending}
-            onClick={() => {
-              if (deleteTarget) deleteMut.mutate(deleteTarget.id)
-            }}
-          >
-            {deleteMut.isPending ? 'Deleting…' : 'Delete'}
-          </Button>
-        </DialogFooter>
-      </PopupModal>
+        pending={deleteMut.isPending}
+        onConfirm={() => {
+          if (deleteTarget) deleteMut.mutate(deleteTarget.id)
+        }}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }

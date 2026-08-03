@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { SerialNumberLabel } from '@/components/SerialNumberLabel'
+import { LabeledRow } from '@/components/LabeledRow'
 import type { Component } from '@/api/types'
 import { normalizeManufacturer } from '@/lib/utils'
 
@@ -84,12 +84,9 @@ export function ComponentForm({
     label: string,
     el: React.ReactNode,
   ) => (
-    <div className="grid grid-cols-[140px_1fr] items-center gap-x-3 gap-y-1">
-      <Label htmlFor={id} className="text-right text-xs text-muted-foreground">
-        {label}
-      </Label>
+    <LabeledRow label={label} htmlFor={id} variant="form">
       {el}
-    </div>
+    </LabeledRow>
   )
 
   return (

@@ -5,6 +5,7 @@ import {
   useColumnWidths,
   type ColumnWidths,
 } from "@/hooks/useColumnWidths"
+import { ResizeHandle } from "@/components/ui/resize-handle"
 
 /* -------------------------------------------------------------------------- */
 /* Column resize context                                                      */
@@ -48,8 +49,8 @@ type TableProps = React.ComponentProps<"table"> & {
   minColumnWidths?: ColumnWidths
   /**
    * Classes for the scroll container wrapping the table. Resizable tables
-   * scroll horizontally on their own by default; pass `overflow-visible` to let
-   * an ancestor scroll area own both axes instead.
+   * clip horizontally by default (columns always fit the container); pass
+   * `overflow-visible` to let an ancestor scroll area own overflow instead.
    */
   containerClassName?: string
 }
@@ -136,12 +137,27 @@ function ResizableTable({
     const el = containerRef.current
     if (!el) return
 
-    const update = () => {
-      setContainerWidth(Math.floor(el.clientWidth))
+    const readWidth = (entry?: ResizeObserverEntry) => {
+      // Prefer the content box from the observer so a scrollbar on this (or a
+      // parent) element cannot feed back into the measured width and cause a
+      // fit ↔ scrollbar flicker loop.
+      const box = entry?.contentBoxSize
+      const size = Array.isArray(box) ? box[0] : box
+      const fromBox = size && "inlineSize" in size ? size.inlineSize : undefined
+      const raw =
+        typeof fromBox === "number" && Number.isFinite(fromBox)
+          ? fromBox
+          : (entry?.contentRect.width ?? el.getBoundingClientRect().width)
+      return Math.floor(raw)
+    }
+
+    const update = (entries?: ResizeObserverEntry[]) => {
+      const next = readWidth(entries?.[0])
+      setContainerWidth((prev) => (prev === next ? prev : next))
     }
     update()
 
-    const observer = new ResizeObserver(update)
+    const observer = new ResizeObserver((entries) => update(entries))
     observer.observe(el)
     return () => observer.disconnect()
   }, [])
@@ -172,7 +188,7 @@ function ResizableTable({
       <TableRoot
         containerRef={containerRef}
         className={cn("table-fixed", className)}
-        containerClassName={containerClassName ?? "overflow-x-auto overflow-y-hidden"}
+        containerClassName={containerClassName ?? "overflow-x-hidden overflow-y-hidden"}
         style={{ ...style, width: totalWidth > 0 ? totalWidth : undefined }}
         colgroup={
           <colgroup>
@@ -299,30 +315,19 @@ function ColumnResizeHandle({
   onActiveChange: (id: string | null) => void
 }) {
   return (
-    <div
-      role="separator"
-      aria-orientation="vertical"
-      aria-label={`Resize ${columnId} column`}
-      data-slot="column-resize-handle"
-      className={cn(
-        // Wide invisible hit area (~10px) centered on the border for easier grabbing
-        "absolute top-0 right-0 z-10 h-full w-2.5 -translate-x-1/2 cursor-col-resize touch-none select-none",
-        // Thin 1px hairline — stays visually light
-        "after:pointer-events-none after:absolute after:inset-y-1.5 after:left-1/2 after:w-px after:-translate-x-1/2 after:rounded-full after:bg-border/50 after:transition-colors",
-        "hover:after:bg-foreground/20",
-        active && "after:bg-foreground/30",
-      )}
+    <ResizeHandle
+      label={`Resize ${columnId} column`}
+      active={active}
+      className="right-0"
       onMouseEnter={() => onActiveChange(columnId)}
       onMouseLeave={() => {
         if (document.body.style.cursor !== "col-resize") {
           onActiveChange(null)
         }
       }}
-      onMouseDown={(event) => {
-        event.preventDefault()
-        event.stopPropagation()
+      onDragStart={(clientX) => {
         onActiveChange(columnId)
-        onDragStart(columnId, event.clientX)
+        onDragStart(columnId, clientX)
 
         const clearActive = () => {
           onActiveChange(null)

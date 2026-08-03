@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 
-export const PANEL_DEFAULT_WIDTH_PX = 420
-export const PANEL_MIN_WIDTH_PX = 420
+const PANEL_DEFAULT_WIDTH_PX = 420
+const PANEL_MIN_WIDTH_PX = 420
 const PANEL_MAX_RATIO = 0.5
 
 function clampWidth(width: number, maxWidth: number) {
